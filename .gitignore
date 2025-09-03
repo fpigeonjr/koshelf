@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+
+# Environment variables
+.env
+
+# Docker
+.docker/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+backups/
+
+# Generated site output (will be regenerated)
+data/site-output/*
+!data/site-output/.gitkeep
+
+# Books and personal data (add your own books)
+data/books/*
+!data/books/.gitkeep
+
+# KOReader sync data (personal reading data)
+data/koreader-settings/*
+!data/koreader-settings/.gitkeep
+
+# WebDAV config files (generated)
+data/config.yaml
+config.yaml
+
+# Temporary files
+*.tmp
+*.swp
+*~

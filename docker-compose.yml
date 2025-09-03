@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  koshelf:
+    build:
+      context: ./docker/koshelf
+      dockerfile: Dockerfile
+    container_name: koshelf-app
+    volumes:
+      - ./data/books:/app/books
+      - ./data/site-output:/app/site-output
+      - ./data/koreader-settings:/app/koreader-settings
+    environment:
+      - KOSHELF_WATCH_MODE=true
+      - KOSHELF_OUTPUT_DIR=/app/site-output
+      - KOSHELF_BOOKS_DIR=/app/books
+    restart: unless-stopped
+    depends_on:
+      - webdav
+    networks:
+      - koshelf-network
+
+  webdav:
+    image: bytemark/webdav:latest
+    container_name: koshelf-webdav
+    ports:
+      - "8081:80"
+    volumes:
+      - ./data/koreader-settings:/var/lib/dav:rw
+    environment:
+      - AUTH_TYPE=Basic
+      - USERNAME=koreader
+      - PASSWORD=koreader123
+    restart: unless-stopped
+    networks:
+      - koshelf-network
+
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    container_name: koshelf-nginx
+    ports:
+      - "3000:80"
+    volumes:
+      - ./data/site-output:/usr/share/nginx/html
+    depends_on:
+      - koshelf
+    restart: unless-stopped
+    networks:
+      - koshelf-network
+
+networks:
+  koshelf-network:
+    driver: bridge
+
+volumes:
+  books_data:
+  site_output:
+  koreader_settings:
