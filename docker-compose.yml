@@ -42,7 +42,7 @@ services:
       dockerfile: Dockerfile
     container_name: koshelf-nginx
     ports:
-      - "3000:80"
+      - "8090:80"
     volumes:
       - ./data/site-output:/usr/share/nginx/html
     depends_on:

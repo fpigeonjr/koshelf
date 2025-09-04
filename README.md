@@ -29,7 +29,7 @@ cp /path/to/your/books/*.epub ./data/books/
 ```
 
 ### 3. **Access your library**:
-- 📖 **Web interface**: http://localhost:3000
+- 📖 **Web interface**: http://koshelf.books (see Custom Domain Setup below)
 - ⚙️ **WebDAV (KOReader sync)**: http://YOUR_IP:8081
 
 ## Reading Workflows
@@ -89,6 +89,53 @@ Use the included scripts for device-specific workflows:
 - **Dependency Chain**: nginx → koshelf → webdav
 - **Volume Sharing**: All services access shared data volumes
 - **Health Monitoring**: Automatic container restart policies
+
+## Custom Domain Setup (koshelf.books)
+
+For seamless access without port numbers, you can set up a custom domain on your local network:
+
+### Prerequisites
+- Pi-hole or local DNS server on your network
+- nginx installed on your Mac (for reverse proxy)
+
+### 1. Configure nginx reverse proxy
+```bash
+# Install nginx (if not already installed)
+brew install nginx
+
+# Create server configuration
+sudo tee /opt/homebrew/etc/nginx/servers/koshelf.conf << 'EOF'
+server {
+    listen 80;
+    server_name koshelf.books;
+
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+# Test and start nginx
+sudo nginx -t
+sudo nginx
+```
+
+### 2. Add DNS record to Pi-hole
+1. Access your Pi-hole admin interface (e.g., http://192.168.1.100/admin)
+2. Go to "Local DNS" → "DNS Records"
+3. Add new record:
+   - **Domain**: `koshelf.books`
+   - **IP Address**: Your Mac's IP (e.g., `192.168.1.150`)
+
+### 3. Access your library
+Once configured, access your library at: **http://koshelf.books**
+
+### Note: Port Configuration
+This setup assumes KOShelf runs on port 8090 (instead of 3000) to avoid conflicts with Calibre on port 8080. The docker-compose.yml has been configured accordingly.
 
 ## KOReader WebDAV Setup
 
@@ -365,7 +412,8 @@ PASSWORD=koreader123                       # WebDAV password
 
 ### Network Architecture
 - **Bridge Network**: `koshelf-network` (172.x.x.x/16 subnet)
-- **External Ports**: 3000 (nginx), 8081 (webdav)
+- **External Ports**: 8090 (nginx), 8081 (webdav)
+- **Custom Domain**: koshelf.books via nginx reverse proxy on port 80
 - **Internal Communication**: Container name resolution
 - **Security**: No external database ports exposed
 

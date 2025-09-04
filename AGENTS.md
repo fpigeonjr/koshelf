@@ -147,11 +147,12 @@ The auto-detection system monitors KOReader WebDAV sync data to automatically im
 
 ### Manual Testing Procedures
 1. **Container Health**: `podman-compose ps` - all services running
-2. **Web Interface**: Access http://localhost:3000
+2. **Web Interface**: Access http://koshelf.books (or http://localhost:8090)
 3. **WebDAV Connectivity**: `curl -u koreader:koreader123 http://localhost:8081/`
 4. **File Watching**: Add EPUB to `data/books/`, verify regeneration
 5. **Auto-Detection**: Create test .sdr folder in `data/koreader-settings/`, verify detection
 6. **KOReader Sync**: Test device connection and sync functionality
+7. **Domain Resolution**: `nslookup koshelf.books` should resolve to 192.168.1.150
 
 ### Debugging Workflows
 1. **Log Analysis**: Start with `podman-compose logs -f`
@@ -161,11 +162,13 @@ The auto-detection system monitors KOReader WebDAV sync data to automatically im
 5. **Resource Monitoring**: Use `podman stats` for performance issues
 
 ### Common Issues & Solutions
-- **Port Conflicts**: Check for existing services on 3000/8081
+- **Port Conflicts**: Check for existing services on 8090/8081 (Calibre uses 8080)
 - **File Permissions**: Ensure EPUB files are readable by container
 - **Network Isolation**: Verify devices on same subnet for WebDAV
 - **Resource Limits**: Monitor container memory/CPU usage
 - **Volume Mounts**: Validate bind mount paths and permissions
+- **Domain Access**: Ensure Pi-hole DNS and nginx reverse proxy are configured
+- **DNS Resolution**: Flush DNS cache with `sudo dscacheutil -flushcache` if needed
 
 ## Environment Considerations
 
@@ -180,6 +183,16 @@ The auto-detection system monitors KOReader WebDAV sync data to automatically im
 - Implement proper backup strategies for user data
 - Network firewall configuration for external access
 - SSL/TLS termination for secure WebDAV connections
+
+### Mac Mini Server Configuration
+- **Static IP**: 192.168.1.150 (reserved in router DHCP)
+- **Domain**: koshelf.books (via Pi-hole DNS)
+- **Services**: 
+  - KOShelf on port 8090 (containerized)
+  - Calibre on port 8080 (native)
+  - nginx reverse proxy on port 80 (for domain access)
+- **DNS Setup**: Pi-hole at 192.168.1.100 resolves koshelf.books
+- **Access**: http://koshelf.books (no port needed)
 
 ## Agent-Specific Notes
 
