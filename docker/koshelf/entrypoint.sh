@@ -3,6 +3,7 @@ set -e
 
 BOOKS_DIR=${KOSHELF_BOOKS_DIR:-/app/books}
 OUTPUT_DIR=${KOSHELF_OUTPUT_DIR:-/app/site-output}
+STATISTICS_DB=${KOSHELF_STATISTICS_DB:-/app/koreader-settings/data/statistics.sqlite3}
 WATCH_INTERVAL=${KOSHELF_WATCH_INTERVAL:-5}
 TITLE=${KOSHELF_TITLE:-"KoShelf Library"}
 PORT=${KOSHELF_PORT:-3000}
@@ -10,6 +11,7 @@ PORT=${KOSHELF_PORT:-3000}
 echo "Starting KoShelf with file watching..."
 echo "Books directory: $BOOKS_DIR"
 echo "Output directory: $OUTPUT_DIR"
+echo "Statistics database: $STATISTICS_DB"
 echo "Watch interval: ${WATCH_INTERVAL}s"
 echo "Title: $TITLE"
 
@@ -17,7 +19,13 @@ mkdir -p "$BOOKS_DIR" "$OUTPUT_DIR"
 
 generate_site() {
     echo "Generating site..."
-    koshelf --books-path "$BOOKS_DIR" --output "$OUTPUT_DIR" --title "$TITLE" --include-unread
+    if [ -f "$STATISTICS_DB" ]; then
+        echo "Using statistics database: $STATISTICS_DB"
+        koshelf --books-path "$BOOKS_DIR" --statistics-db "$STATISTICS_DB" --output "$OUTPUT_DIR" --title "$TITLE" --include-unread
+    else
+        echo "Statistics database not found, proceeding without reading stats"
+        koshelf --books-path "$BOOKS_DIR" --output "$OUTPUT_DIR" --title "$TITLE" --include-unread
+    fi
     echo "Site generated at $(date)"
 }
 
