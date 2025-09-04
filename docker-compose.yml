@@ -3,13 +3,14 @@ version: '3.8'
 services:
   koshelf:
     build:
-      context: ./docker/koshelf
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./docker/koshelf/Dockerfile
     container_name: koshelf-app
     volumes:
       - ./data/books:/app/books
       - ./data/site-output:/app/site-output
       - ./data/koreader-settings:/app/koreader-settings
+      - ./scripts:/app/scripts:ro
     environment:
       - KOSHELF_WATCH_MODE=true
       - KOSHELF_OUTPUT_DIR=/app/site-output

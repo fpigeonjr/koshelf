@@ -17,8 +17,13 @@ RUN curl -L https://github.com/paviro/KoShelf/releases/download/v1.0.20/linux-gn
     && chmod +x /usr/local/bin/koshelf \
     && rm koshelf.zip
 
-COPY entrypoint.sh /entrypoint.sh
+COPY docker/koshelf/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Create scripts directory and copy auto-find script  
+RUN mkdir -p /app/scripts
+COPY scripts/auto-find-book.sh /app/scripts/auto-find-book.sh
+RUN chmod +x /app/scripts/auto-find-book.sh
 
 VOLUME ["/app/books", "/app/site-output", "/app/koreader-settings"]
 

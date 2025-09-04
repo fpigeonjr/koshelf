@@ -6,6 +6,7 @@ A sophisticated Podman-based deployment setup for [KOShelf](https://github.com/p
 
 - 📚 **Auto-generated library sites** with responsive design and search
 - 🔄 **Real-time file watching** - instant site regeneration on library changes
+- 🤖 **Auto-book detection** - automatically finds and imports EPUBs when you start reading
 - 📱 **WebDAV server** for seamless KOReader device synchronization
 - 📊 **Reading statistics integration** from KOReader SQLite databases
 - 🌐 **Local network access** via optimized nginx reverse proxy
@@ -15,21 +16,46 @@ A sophisticated Podman-based deployment setup for [KOShelf](https://github.com/p
 
 ## Quick Start
 
-1. **Clone and setup**:
-   ```bash
-   git clone https://github.com/fpigeonjr/koshelf.git
-   cd koshelf
-   podman-compose up -d
-   ```
+### 1. **Clone and setup**:
+```bash
+git clone https://github.com/fpigeonjr/koshelf.git
+cd koshelf
+podman-compose up -d
+```
 
-2. **Add your books**:
-   ```bash
-   cp /path/to/your/books/*.epub ./data/books/
-   ```
+### 2. **Add your books**:
+```bash
+cp /path/to/your/books/*.epub ./data/books/
+```
 
-3. **Access your library**:
-   - 📖 **Web interface**: http://localhost:3000
-   - ⚙️ **WebDAV (KOReader sync)**: http://YOUR_IP:8081
+### 3. **Access your library**:
+- 📖 **Web interface**: http://localhost:3000
+- ⚙️ **WebDAV (KOReader sync)**: http://YOUR_IP:8081
+
+## Reading Workflows
+
+### Option A: Automatic OPDS Detection (Recommended)
+1. **Download via OPDS** - Download books from Calibre OPDS to your KOReader device
+2. **Start reading** - Open the book in KOReader and make your first highlight
+3. **Auto-detection** - KOShelf detects the new book and searches for the EPUB file
+4. **Auto-import** - If found, the EPUB is automatically copied to your library
+5. **Continuous sync** - All highlights and progress sync wirelessly via WebDAV
+
+### Option B: Manual Book Management
+1. **Copy EPUBs** - Manually place EPUB files in `./data/books/`
+2. **Transfer to device** - Copy books to your KOReader device
+3. **Configure sync** - Set up WebDAV in KOReader settings
+4. **Read and sync** - Highlights and progress sync automatically
+
+### Option C: Device Sync Scripts
+Use the included scripts for device-specific workflows:
+```bash
+# Kindle device sync
+./scripts/sync-kindle-books.sh
+
+# Extract highlights to readable formats
+./scripts/extract_sdr_highlights.py ./data/books --format markdown
+```
 
 ## Architecture
 
@@ -39,9 +65,10 @@ A sophisticated Podman-based deployment setup for [KOShelf](https://github.com/p
 │ (ARM64 v1.0.20)     │    │ (Apache/bytemark)    │    │ (Static Delivery)   │
 │                     │    │                      │    │                     │
 │ • inotify watching  │    │ • KOReader sync      │    │ • Optimized serving │
-│ • Site generation   │    │ • Basic auth         │    │ • Gzip compression  │
-│ • SQLite stats      │    │ • Progress tracking  │    │ • Cache headers     │
-│ • Auto-rebuild      │    │ • Port 8081          │    │ • Port 3000         │
+│ • Auto-detection    │    │ • Basic auth         │    │ • Gzip compression  │
+│ • Site generation   │    │ • Progress tracking  │    │ • Cache headers     │
+│ • SQLite stats      │    │ • Port 8081          │    │ • Port 3000         │
+│ • Auto-rebuild      │    │                      │    │                     │
 │ • Python3 server    │    │                      │    │                     │
 └─────────────────────┘    └──────────────────────┘    └─────────────────────┘
           │                          │                          │
@@ -80,6 +107,35 @@ In KOReader: **Settings → Network → Cloud storage → WebDAV**
 ### 3. Test Connection
 - Tap **"Test"** to verify connectivity
 - Enable sync for reading progress, bookmarks, notes
+
+## Auto-Detection Feature
+
+KOShelf now automatically detects when you start reading new books downloaded via OPDS and attempts to find and import the corresponding EPUB files.
+
+### How It Works
+1. **WebDAV Monitoring** - KOShelf watches the `koreader-settings/` directory for new `.sdr` metadata folders
+2. **Smart Search** - When a new book is detected, the auto-find script searches common locations:
+   - `/Volumes/Kindle/documents` (Kindle via USB)
+   - `/Volumes/*/documents` (Other e-readers via USB)
+   - `/mnt/*/documents` and `/media/*/documents` (Linux mount points)
+   - `~/Downloads` and `~/Documents` (Common download locations)
+3. **Automatic Import** - If found, the EPUB is automatically copied to your library
+4. **Instant Availability** - The book appears in your web library immediately
+
+### Manual Fallback
+If auto-detection fails, you'll see helpful messages in the logs with:
+- Clear instructions for manual copying
+- Suggested locations to check
+- Commands to run for device-specific sync
+
+### Monitoring Auto-Detection
+```bash
+# Watch for auto-detection events
+podman-compose logs -f koshelf | grep -E "New book detected|Auto-find"
+
+# Check if both watchers are running
+podman-compose logs koshelf | grep "watcher PID"
+```
 
 ## Management Commands
 
@@ -151,6 +207,12 @@ koshelf/
 │   ├── koreader-settings/       # KOReader sync data
 │   └── site-output/             # Generated static site
 ├── scripts/                     # Utility scripts
+│   ├── auto-find-book.sh        # Auto EPUB detection and copying
+│   ├── backup.sh                # Data backup automation
+│   ├── extract_highlights.py    # KOReader highlights from database
+│   ├── extract_sdr_highlights.py # Full highlight extraction from .sdr files
+│   ├── setup.sh                 # Initial setup helper
+│   └── sync-kindle-books.sh     # Kindle import automation
 └── .env.example                 # Environment template
 ```
 
