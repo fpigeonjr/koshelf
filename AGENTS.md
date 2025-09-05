@@ -43,8 +43,8 @@ koshelf/
 │   │   ├── Dockerfile              # nginx:alpine configuration
 │   │   └── default.conf            # Optimized static serving
 ├── data/                           # Persistent data volumes
-│   ├── books/                      # EPUB library (user content)
-│   ├── koreader-settings/          # Sync data & reading statistics
+│   ├── books/                      # EPUB library and .sdr metadata (user content)
+│   ├── koreader-settings/          # Legacy sync data (not actively used)
 │   └── site-output/                # Generated static websites
 ├── scripts/                        # Utility scripts
 │   ├── auto-find-book.sh           # Auto EPUB detection and copying
@@ -117,7 +117,7 @@ koshelf/
 The Syncthing integration provides real-time bidirectional sync between KOReader devices and the KOShelf library.
 
 ### Key Components
-1. **Dual Folder Sync**: Separate sync for settings and documents directories
+1. **Documents Folder Sync**: Single sync for documents directory containing books and metadata
 2. **Dual Detection System**: inotify watchers + backup polling for reliability across platforms
 3. **Real-time Monitoring**: Primary inotify detection with polling fallback
 4. **Smart Conflict Resolution**: Syncthing handles file conflicts gracefully
@@ -125,18 +125,16 @@ The Syncthing integration provides real-time bidirectional sync between KOReader
 6. **Enhanced Content Detection**: Monitors file modifications within existing .sdr directories
 
 ### Implementation Details
-- **Settings Sync**: `/mnt/us/koreader/settings/` ↔ `~/Code/koshelf/data/koreader-settings/`
-  - Statistics database (reading progress, highlight counts)
-  - KOReader configuration and preferences
 - **Documents Sync**: `/mnt/us/documents/` ↔ `~/Code/koshelf/data/books/`
   - EPUB files and .sdr metadata directories
   - Complete highlight and annotation content
+  - Reading statistics and progress data within .sdr files
 - **File Handling**: Automatic sync with configurable ignore patterns
 - **Error Recovery**: Graceful handling of sync conflicts and network issues
 
 ### Sync Locations
-1. **KOReader Settings Directory** - Configuration and statistics
-2. **Documents Directory** - EPUBs and metadata (.sdr folders)
+1. **Documents Directory** - EPUBs, metadata (.sdr folders), and reading statistics
+2. **Single Folder Sync** - All KOReader data in one location for simplicity
 3. **Bidirectional Sync** - Changes flow both ways seamlessly
 4. **Real-time Updates** - No manual intervention required
 
@@ -178,7 +176,7 @@ Located in `docker/koshelf/entrypoint.sh`, the system implements:
 
 1. **Multiple Background Processes**:
    - Books directory watcher (inotify)
-   - KOReader settings watcher (inotify)  
+   - Legacy KOReader settings watcher (inotify)  
    - Statistics database watcher (inotify)
    - Backup polling process (timed)
 
@@ -186,7 +184,7 @@ Located in `docker/koshelf/entrypoint.sh`, the system implements:
    - EPUB file count monitoring
    - .sdr directory count monitoring
    - File modification timestamp tracking within .sdr directories
-   - Statistics database change detection
+   - Statistics data change detection within .sdr files
 
 3. **Graceful Degradation**:
    - If inotify fails, polling continues to provide detection

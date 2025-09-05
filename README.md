@@ -36,7 +36,7 @@ cp /path/to/your/books/*.epub ./data/books/
 
 ### Option A: Syncthing Integration (Recommended)
 1. **Install KOReader Syncthing plugin** - Download and install on your KOReader device
-2. **Configure dual folder sync** - Sync both KOReader settings and documents directories
+2. **Configure documents folder sync** - Sync your entire documents directory
 3. **Start reading** - Books and highlights sync automatically in real-time
 4. **Auto-detection** - KOShelf detects new books and highlights automatically
 
@@ -166,21 +166,17 @@ brew install syncthing
 syncthing
 ```
 
-### 3. Set Up Dual Folder Sync
-Configure two separate sync folders for complete data synchronization:
+### 3. Set Up Documents Folder Sync
+Configure Syncthing to sync your KOReader documents directory with your KOShelf library:
 
-#### Folder 1: KOReader Settings
-- **Mac path**: `~/Code/koshelf/data/koreader-settings`
-- **Kindle path**: `/mnt/us/koreader/settings`
-- **Purpose**: Statistics database, configuration, reading progress
-
-#### Folder 2: Documents (Books + Metadata)
+#### Documents (Books + Metadata)
 - **Mac path**: `~/Code/koshelf/data/books`
 - **Kindle path**: `/mnt/us/documents`
-- **Purpose**: EPUB files and .sdr metadata directories with highlights
+- **Purpose**: EPUB files and .sdr metadata directories with highlights, reading progress, and statistics
+- **Type**: Receive Only (Mac receives changes from Kindle)
 
 ### 4. Configure Ignore Patterns
-For both folders, use these ignore patterns:
+For the documents folder, use these ignore patterns:
 ```
 /.syncthing/
 /.stfolder
@@ -196,7 +192,7 @@ DavLock*
 ### 5. Test Sync
 1. **Make a highlight** in KOReader
 2. **Check sync status** in Syncthing web UI
-3. **Verify files appear** in Mac directories
+3. **Verify files appear** in Mac `~/Code/koshelf/data/books` directory
 4. **Confirm KOShelf updates** automatically
 
 ## Auto-Detection & Auto-Regeneration
@@ -225,10 +221,10 @@ The auto-regeneration system uses a sophisticated approach to handle the limitat
 - **Configurable Intervals**: `POLL_INTERVAL` environment variable (default: 30 seconds)
 
 ### What Gets Synced
-- **EPUB files** - Your entire book library
-- **Reading progress** - Statistics database with completion percentages
-- **.sdr metadata** - Complete highlight and annotation data
-- **Configuration** - KOReader settings and preferences
+- **EPUB files** - Your entire book library in `/mnt/us/documents`
+- **Reading progress** - Progress data stored in .sdr metadata files
+- **.sdr metadata** - Complete highlight and annotation data alongside each book
+- **Reading statistics** - Session data and reading metrics within .sdr files
 
 ### Monitoring Auto-Regeneration
 ```bash
@@ -310,8 +306,8 @@ koshelf/
 │   ├── nginx/                   # Static site proxy
 │   └── webdav/                  # WebDAV server config
 ├── data/                        # Persistent data
-│   ├── books/                   # Your ebook library (.epub files)
-│   ├── koreader-settings/       # KOReader sync data
+│   ├── books/                   # Your ebook library (.epub files + .sdr metadata)
+│   ├── koreader-settings/       # Legacy sync data (not actively used)
 │   └── site-output/             # Generated static site
 ├── scripts/                     # Utility scripts
 │   ├── auto-find-book.sh        # Auto EPUB detection and copying
@@ -386,12 +382,12 @@ koshelf/
 
 2. **Sync Data Investigation**:
    ```bash
-   # Examine sync files
-   ls -la ./data/koreader-settings/
-   find ./data/koreader-settings -name "*.sdr" -exec ls -la {} \;
+   # Examine sync files in books directory
+   ls -la ./data/books/
+   find ./data/books -name "*.sdr" -exec ls -la {} \;
    
-   # Statistics database
-   file ./data/koreader-settings/data/statistics.sqlite3
+   # Check for statistics data within .sdr files
+   find ./data/books -name "*statistics*" -o -name "*session*"
    ```
 
 ### Auto-Regeneration Issues
@@ -466,7 +462,7 @@ podman-compose up -d
 KOSHELF_WATCH_MODE=true                    # Enable file watching
 KOSHELF_OUTPUT_DIR=/app/site-output        # Generated site location
 KOSHELF_BOOKS_DIR=/app/books               # EPUB library path
-KOSHELF_STATISTICS_DB=/app/koreader-settings/data/statistics.sqlite3
+KOSHELF_STATISTICS_DB=/app/books/statistics.sqlite3  # Statistics in books directory
 KOSHELF_WATCH_INTERVAL=5                   # Seconds between inotify checks
 POLL_INTERVAL=30                           # Seconds between polling checks (backup detection)
 KOSHELF_TITLE="KoShelf Library"            # Site title
@@ -481,14 +477,13 @@ PASSWORD=koreader123                       # WebDAV password
 ### File System Layout
 ```
 ./data/
-├── books/                          # EPUB library (bind mount)
+├── books/                          # EPUB library and metadata (bind mount)
 │   ├── *.epub                      # Book files
 │   └── *.sdr/                      # KOReader metadata directories
-│       ├── metadata.epub.lua       # Book metadata
+│       ├── metadata.epub.lua       # Book metadata and highlights
+│       ├── statistics.epub.lua     # Reading statistics
 │       └── metadata.epub.lua.old   # Backup metadata
-├── koreader-settings/              # KOReader sync data
-│   └── data/
-│       └── statistics.sqlite3      # Reading statistics
+├── koreader-settings/              # Legacy sync data (not actively used)
 └── site-output/                    # Generated static website
     ├── index.html                  # Main library page
     ├── books/                      # Individual book pages
