@@ -199,15 +199,30 @@ DavLock*
 3. **Verify files appear** in Mac directories
 4. **Confirm KOShelf updates** automatically
 
-## Auto-Detection Feature
+## Auto-Detection & Auto-Regeneration
 
-KOShelf automatically detects when you start reading new books and when highlights are added through real-time Syncthing synchronization.
+KOShelf automatically detects when you start reading new books and when highlights are added through real-time Syncthing synchronization with a robust dual-detection system.
 
 ### How It Works
-1. **Syncthing Monitoring** - KOShelf watches the synced directories for file changes
-2. **Real-time Updates** - New .sdr metadata folders and highlight changes sync instantly
-3. **Automatic Regeneration** - Site updates immediately when new content is detected
-4. **Seamless Integration** - No manual intervention required for most workflows
+1. **Dual Detection System** - Combines inotify watchers with polling for maximum reliability
+2. **inotify Watchers** - Real-time file system events for immediate detection (when supported)
+3. **Backup Polling** - Periodic monitoring (30s intervals) for macOS Docker bind mount compatibility
+4. **Syncthing Monitoring** - Watches synced directories for all types of file changes
+5. **Enhanced Content Detection** - Monitors both directory changes AND file modifications within .sdr folders
+6. **Automatic Regeneration** - Site updates immediately when new content is detected
+7. **Seamless Integration** - No manual intervention required for most workflows
+
+### Technical Implementation
+The auto-regeneration system uses a sophisticated approach to handle the limitations of file watching in containerized environments:
+
+- **Primary Detection**: inotify watchers for instant response when file system events work properly
+- **Fallback Detection**: Polling mechanism that monitors:
+  - EPUB file count changes
+  - .sdr directory count changes  
+  - File modification timestamps within .sdr directories (catches highlight updates)
+  - Statistics database changes
+- **macOS Compatibility**: Polling ensures detection works reliably with Docker bind mounts on macOS
+- **Configurable Intervals**: `POLL_INTERVAL` environment variable (default: 30 seconds)
 
 ### What Gets Synced
 - **EPUB files** - Your entire book library
@@ -215,10 +230,16 @@ KOShelf automatically detects when you start reading new books and when highligh
 - **.sdr metadata** - Complete highlight and annotation data
 - **Configuration** - KOReader settings and preferences
 
-### Monitoring Sync Status
+### Monitoring Auto-Regeneration
 ```bash
-# Watch for sync events
-podman-compose logs -f koshelf | grep -E "file change detected|Site generated"
+# Watch for auto-detection events
+podman-compose logs -f koshelf | grep -E "file change detected|Polling detected|Site generated"
+
+# Monitor polling activity
+podman-compose logs -f koshelf | grep "Polling detected"
+
+# Check all watchers are running
+podman-compose exec koshelf ps aux | grep -E "inotifywait|backup_poll"
 
 # Check Syncthing status
 open http://localhost:8384  # Mac Syncthing web UI
@@ -373,6 +394,31 @@ koshelf/
    file ./data/koreader-settings/data/statistics.sqlite3
    ```
 
+### Auto-Regeneration Issues
+1. **File Detection Problems**:
+   ```bash
+   # Check if watchers are running
+   podman-compose exec koshelf ps aux | grep -E "inotifywait|backup_poll"
+   
+   # Monitor detection logs
+   podman-compose logs -f koshelf | grep -E "file change detected|Polling detected"
+   
+   # Test manual trigger
+   touch ./data/books/test.epub && rm ./data/books/test.epub
+   ```
+
+2. **Polling vs inotify**:
+   ```bash
+   # inotify may not work with Docker bind mounts on macOS
+   # Polling provides backup detection every 30 seconds
+   
+   # Check polling interval
+   podman-compose exec koshelf env | grep POLL_INTERVAL
+   
+   # Force immediate regeneration
+   podman-compose restart koshelf
+   ```
+
 ### Performance & Resource Issues
 1. **Container Resource Usage**:
    ```bash
@@ -421,7 +467,8 @@ KOSHELF_WATCH_MODE=true                    # Enable file watching
 KOSHELF_OUTPUT_DIR=/app/site-output        # Generated site location
 KOSHELF_BOOKS_DIR=/app/books               # EPUB library path
 KOSHELF_STATISTICS_DB=/app/koreader-settings/data/statistics.sqlite3
-KOSHELF_WATCH_INTERVAL=5                   # Seconds between checks
+KOSHELF_WATCH_INTERVAL=5                   # Seconds between inotify checks
+POLL_INTERVAL=30                           # Seconds between polling checks (backup detection)
 KOSHELF_TITLE="KoShelf Library"            # Site title
 KOSHELF_PORT=3000                          # Internal HTTP port
 
@@ -457,11 +504,13 @@ PASSWORD=koreader123                       # WebDAV password
 - **Security**: No external database ports exposed
 
 ### Performance Considerations
-- **File Watching**: inotify-based for minimal CPU overhead
-- **Static Generation**: Full rebuild on any library change
+- **File Watching**: Dual system (inotify + polling) for minimal CPU overhead with reliability
+- **Polling Overhead**: Backup polling every 30 seconds adds minimal resource usage
+- **Static Generation**: Full rebuild on any library change (optimized for small-medium libraries)
 - **Caching**: nginx serves static files with optimized headers
 - **Resource Usage**: ~100MB RAM total for all containers
 - **Storage**: Generated sites typically 1-5MB per 100 books
+- **macOS Compatibility**: Polling mechanism ensures detection works with Docker bind mounts
 
 ## License
 

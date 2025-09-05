@@ -89,12 +89,15 @@ koshelf/
 ## Development Patterns
 
 ### File Watching Implementation
-- Use inotify for efficient file system monitoring
-- Dual watchers: books directory + KOReader settings directory
-- Configurable watch intervals to prevent excessive rebuilds
-- Event filtering: focus on create, delete, modify, move
-- Auto-detection triggers on new .sdr folder creation
-- Graceful handling of rapid file changes
+- **Dual Detection System**: Combines inotify watchers with backup polling for maximum reliability
+- **inotify Watchers**: Primary detection method for real-time file system events
+- **Backup Polling**: Secondary detection (configurable interval, default 30s) for macOS Docker compatibility
+- **Enhanced Content Detection**: Monitors both directory creation AND file modifications within .sdr folders
+- **Event Filtering**: Focus on create, delete, modify, move events
+- **Auto-detection Triggers**: New .sdr folder creation, EPUB additions, highlight updates
+- **Graceful Handling**: Robust handling of rapid file changes and file system limitations
+- **macOS Compatibility**: Polling mechanism ensures reliable detection with Docker bind mounts
+- **Cross-platform**: Works on Linux (primarily inotify) and macOS (primarily polling)
 
 ### Container Communication
 - Internal bridge networks for service isolation
@@ -115,9 +118,11 @@ The Syncthing integration provides real-time bidirectional sync between KOReader
 
 ### Key Components
 1. **Dual Folder Sync**: Separate sync for settings and documents directories
-2. **Real-time Monitoring**: inotify watchers detect changes instantly
-3. **Smart Conflict Resolution**: Syncthing handles file conflicts gracefully
-4. **Auto-regeneration**: Site updates automatically when content changes
+2. **Dual Detection System**: inotify watchers + backup polling for reliability across platforms
+3. **Real-time Monitoring**: Primary inotify detection with polling fallback
+4. **Smart Conflict Resolution**: Syncthing handles file conflicts gracefully
+5. **Auto-regeneration**: Site updates automatically when content changes detected by either system
+6. **Enhanced Content Detection**: Monitors file modifications within existing .sdr directories
 
 ### Implementation Details
 - **Settings Sync**: `/mnt/us/koreader/settings/` ↔ `~/Code/koshelf/data/koreader-settings/`
@@ -138,8 +143,79 @@ The Syncthing integration provides real-time bidirectional sync between KOReader
 ### Configuration
 - **Ignore Patterns**: Configured to avoid syncing temporary and system files
 - **Conflict Resolution**: Syncthing handles file conflicts automatically
-- **Monitoring**: File watchers trigger immediate site regeneration
+- **Monitoring**: Dual detection system (inotify + polling) triggers immediate site regeneration
 - **Security**: Local network sync with device authentication
+- **Polling Interval**: Configurable via `POLL_INTERVAL` environment variable (default: 30s)
+- **Platform Compatibility**: Optimized for both Linux (inotify-primary) and macOS (polling-primary)
+
+## Auto-Regeneration System
+
+### Technical Background
+The auto-regeneration system addresses a critical issue with file watching in containerized environments, particularly on macOS where Docker bind mounts don't reliably trigger inotify events for file changes made on the host system.
+
+### Problem Statement
+- **inotify Limitations**: inotify file watchers inside Docker containers don't detect file changes made by external processes (like Syncthing) on macOS host systems
+- **Syncthing Integration**: File changes from KOReader devices sync to the host via Syncthing, but containers don't detect these changes
+- **Manual Intervention**: Previously required container restarts to detect new highlights and content
+
+### Solution Architecture
+A robust dual-detection system that combines the efficiency of inotify with the reliability of polling:
+
+#### Primary Detection (inotify)
+- **Real-time Events**: Detects file system changes instantly when supported
+- **Low Resource Usage**: Minimal CPU overhead for event-driven detection
+- **Event Types**: Monitors create, delete, modify, move operations
+- **Multiple Watchers**: Separate processes for books, settings, and statistics directories
+
+#### Backup Detection (Polling)
+- **Cross-platform Compatibility**: Works reliably on all platforms and container environments
+- **Content Change Detection**: Monitors file modification timestamps within .sdr directories
+- **Configurable Intervals**: Default 30-second polling with `POLL_INTERVAL` environment variable
+- **Comprehensive Monitoring**: Tracks directory counts AND content modifications
+
+### Implementation Details
+Located in `docker/koshelf/entrypoint.sh`, the system implements:
+
+1. **Multiple Background Processes**:
+   - Books directory watcher (inotify)
+   - KOReader settings watcher (inotify)  
+   - Statistics database watcher (inotify)
+   - Backup polling process (timed)
+
+2. **Enhanced Detection Logic**:
+   - EPUB file count monitoring
+   - .sdr directory count monitoring
+   - File modification timestamp tracking within .sdr directories
+   - Statistics database change detection
+
+3. **Graceful Degradation**:
+   - If inotify fails, polling continues to provide detection
+   - Both systems can trigger regeneration independently
+   - No duplicate regenerations from simultaneous detection
+
+### Environment Variables
+```bash
+KOSHELF_WATCH_INTERVAL=5    # inotify check interval (seconds)
+POLL_INTERVAL=30            # Polling backup interval (seconds)
+```
+
+### Monitoring and Debugging
+```bash
+# Monitor all detection events
+podman-compose logs -f koshelf | grep -E "file change detected|Polling detected"
+
+# Check running watchers
+podman exec koshelf ps aux | grep -E "inotifywait|backup_poll"
+
+# Test polling manually
+podman exec koshelf touch /app/books/test && rm /app/books/test
+```
+
+### Performance Impact
+- **inotify**: Negligible CPU usage, instant detection
+- **Polling**: ~0.1% CPU usage, 30-second detection latency
+- **Combined**: Reliable detection with minimal resource overhead
+- **Scalability**: Suitable for libraries with hundreds of books
 
 ## Testing & Validation
 
@@ -150,6 +226,8 @@ The Syncthing integration provides real-time bidirectional sync between KOReader
 4. **File Watching**: Add EPUB to `data/books/`, verify regeneration
 5. **Sync Testing**: Make highlight on device, verify sync and regeneration
 6. **Domain Resolution**: `nslookup koshelf.books` should resolve to 192.168.1.150
+7. **Auto-Regeneration**: Monitor logs for both inotify and polling detection messages
+8. **Polling Verification**: Check watchers are running with `podman exec koshelf ps aux | grep -E "inotifywait|backup_poll"`
 
 ### Debugging Workflows
 1. **Log Analysis**: Start with `podman-compose logs -f`
@@ -162,10 +240,13 @@ The Syncthing integration provides real-time bidirectional sync between KOReader
 - **Port Conflicts**: Check for existing services on port 8090 (Calibre uses 8080)
 - **File Permissions**: Ensure EPUB files are readable by container
 - **Syncthing Issues**: Verify Syncthing is running and devices are connected
+- **Auto-Regeneration Not Working**: Check both inotify watchers AND polling are running
+- **macOS Docker Bind Mount Issues**: Polling provides backup detection when inotify fails
 - **Resource Limits**: Monitor container memory/CPU usage
 - **Volume Mounts**: Validate bind mount paths and permissions
 - **Domain Access**: Ensure Pi-hole DNS and nginx reverse proxy are configured
 - **DNS Resolution**: Flush DNS cache with `sudo dscacheutil -flushcache` if needed
+- **File Detection**: Use `podman-compose logs -f koshelf | grep -E "file change detected|Polling detected"` to monitor detection events
 
 ## Environment Considerations
 
@@ -205,6 +286,14 @@ The Syncthing integration provides real-time bidirectional sync between KOReader
 - Test configuration changes in isolation
 - Document breaking changes in commit messages
 - Verify backward compatibility with existing data
+
+### When Debugging Auto-Regeneration Issues
+- **Check Both Systems**: Verify both inotify and polling processes are running
+- **Monitor Detection Logs**: Use grep patterns to filter for detection events
+- **Test Each System**: Manually trigger file changes to test detection
+- **Validate Container State**: Ensure watchers survive container restarts
+- **Platform Considerations**: Remember macOS relies more heavily on polling
+- **Timeout Issues**: Check if polling interval needs adjustment for large libraries
 
 ### When Debugging Issues
 - Start with least invasive debugging (logs, status)

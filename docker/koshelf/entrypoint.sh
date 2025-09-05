@@ -6,6 +6,7 @@ OUTPUT_DIR=${KOSHELF_OUTPUT_DIR:-/app/site-output}
 KOREADER_SETTINGS_DIR=${KOSHELF_KOREADER_SETTINGS:-/app/koreader-settings}
 STATISTICS_DB=${KOSHELF_STATISTICS_DB:-/app/koreader-settings/data/statistics.sqlite3}
 WATCH_INTERVAL=${KOSHELF_WATCH_INTERVAL:-5}
+POLL_INTERVAL=${KOSHELF_POLL_INTERVAL:-30}
 TITLE=${KOSHELF_TITLE:-"KoShelf Library"}
 PORT=${KOSHELF_PORT:-3000}
 
@@ -15,6 +16,7 @@ echo "Output directory: $OUTPUT_DIR"
 echo "KOReader settings: $KOREADER_SETTINGS_DIR"
 echo "Statistics database: $STATISTICS_DB"
 echo "Watch interval: ${WATCH_INTERVAL}s"
+echo "Poll interval: ${POLL_INTERVAL}s"
 echo "Title: $TITLE"
 
 mkdir -p "$BOOKS_DIR" "$OUTPUT_DIR" "$KOREADER_SETTINGS_DIR"
@@ -104,25 +106,75 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
         STATS_WATCHER_PID=""
     fi
     
+    # Start backup polling mechanism (for macOS Docker bind mount issues)
+    echo "Starting backup polling mechanism (every ${POLL_INTERVAL}s)..."
+    (
+        LAST_BOOKS_COUNT=0
+        LAST_SDR_COUNT=0
+        LAST_SDR_MTIME=0
+        while true; do
+            sleep "$POLL_INTERVAL"
+            
+            # Check for new books (EPUB files)
+            CURRENT_BOOKS_COUNT=$(find "$BOOKS_DIR" -name "*.epub" 2>/dev/null | wc -l)
+            if [ "$CURRENT_BOOKS_COUNT" -ne "$LAST_BOOKS_COUNT" ]; then
+                echo "Polling detected book count change: $LAST_BOOKS_COUNT -> $CURRENT_BOOKS_COUNT"
+                LAST_BOOKS_COUNT=$CURRENT_BOOKS_COUNT
+                generate_site
+                continue
+            fi
+            
+            # Check for new .sdr directories
+            CURRENT_SDR_COUNT=$(find "$BOOKS_DIR" -name "*.sdr" -type d 2>/dev/null | wc -l)
+            if [ "$CURRENT_SDR_COUNT" -ne "$LAST_SDR_COUNT" ]; then
+                echo "Polling detected .sdr directory change: $LAST_SDR_COUNT -> $CURRENT_SDR_COUNT"
+                LAST_SDR_COUNT=$CURRENT_SDR_COUNT
+                generate_site
+                continue
+            fi
+            
+            # Check for .sdr directory content changes (highlight files, metadata)
+            CURRENT_SDR_MTIME=$(find "$BOOKS_DIR" -name "*.sdr" -type d -exec find {} -type f \; 2>/dev/null | xargs stat -c %Y 2>/dev/null | sort -n | tail -1 || echo 0)
+            if [ "$CURRENT_SDR_MTIME" -gt "$LAST_SDR_MTIME" ]; then
+                echo "Polling detected .sdr content change (newest file: $(date -d @$CURRENT_SDR_MTIME))"
+                LAST_SDR_MTIME=$CURRENT_SDR_MTIME
+                generate_site
+                continue
+            fi
+            
+            # Check for statistics database changes
+            if [ -f "$STATISTICS_DB" ]; then
+                CURRENT_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
+                if [ "${LAST_STATS_MTIME:-0}" -ne "$CURRENT_STATS_MTIME" ]; then
+                    echo "Polling detected statistics database change"
+                    LAST_STATS_MTIME=$CURRENT_STATS_MTIME
+                    generate_site
+                fi
+            fi
+        done
+    ) &
+    POLLING_PID=$!
+    
     # Start simple HTTP server for the generated site
     echo "Starting HTTP server on port $PORT..."
     cd "$OUTPUT_DIR"
     python3 -m http.server "$PORT" &
     SERVER_PID=$!
     
-    trap "kill $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID ${STATS_WATCHER_PID:-} $SERVER_PID 2>/dev/null || true; exit" SIGTERM SIGINT
+    trap "kill $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID ${STATS_WATCHER_PID:-} $POLLING_PID $SERVER_PID 2>/dev/null || true; exit" SIGTERM SIGINT
     
     echo "KoShelf is ready!"
     echo "Books watcher PID: $BOOKS_WATCHER_PID"
     echo "KOReader watcher PID: $KOREADER_WATCHER_PID"
     echo "Statistics watcher PID: ${STATS_WATCHER_PID:-disabled}"
+    echo "Backup polling PID: $POLLING_PID"
     echo "HTTP server PID: $SERVER_PID"
     echo "Access your library at: http://localhost:$PORT"
     
     if [ -n "$STATS_WATCHER_PID" ]; then
-        wait $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $STATS_WATCHER_PID $SERVER_PID
+        wait $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $STATS_WATCHER_PID $POLLING_PID $SERVER_PID
     else
-        wait $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $SERVER_PID
+        wait $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $POLLING_PID $SERVER_PID
     fi
 else
     echo "Watch mode disabled. Generating site once..."
