@@ -16,23 +16,6 @@ services:
       - KOSHELF_OUTPUT_DIR=/app/site-output
       - KOSHELF_BOOKS_DIR=/app/books
     restart: unless-stopped
-    depends_on:
-      - webdav
-    networks:
-      - koshelf-network
-
-  webdav:
-    image: bytemark/webdav:latest
-    container_name: koshelf-webdav
-    ports:
-      - "8081:80"
-    volumes:
-      - ./data/koreader-settings:/var/lib/dav:rw
-    environment:
-      - AUTH_TYPE=Basic
-      - USERNAME=koreader
-      - PASSWORD=koreader123
-    restart: unless-stopped
     networks:
       - koshelf-network
 

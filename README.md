@@ -7,7 +7,7 @@ A sophisticated Podman-based deployment setup for [KOShelf](https://github.com/p
 - 📚 **Auto-generated library sites** with responsive design and search
 - 🔄 **Real-time file watching** - instant site regeneration on library changes
 - 🤖 **Auto-book detection** - automatically finds and imports EPUBs when you start reading
-- 📱 **WebDAV server** for seamless KOReader device synchronization
+- 🔄 **Syncthing integration** for seamless KOReader device synchronization
 - 📊 **Reading statistics integration** from KOReader SQLite databases
 - 🌐 **Local network access** via optimized nginx reverse proxy
 - 📦 **Podman Compose orchestration** with proper service dependencies
@@ -30,22 +30,21 @@ cp /path/to/your/books/*.epub ./data/books/
 
 ### 3. **Access your library**:
 - 📖 **Web interface**: http://koshelf.books (see Custom Domain Setup below)
-- ⚙️ **WebDAV (KOReader sync)**: http://YOUR_IP:8081
+- 🔄 **Syncthing sync**: Configure KOReader Syncthing plugin (see KOReader Syncthing Setup below)
 
 ## Reading Workflows
 
-### Option A: Automatic OPDS Detection (Recommended)
-1. **Download via OPDS** - Download books from Calibre OPDS to your KOReader device
-2. **Start reading** - Open the book in KOReader and make your first highlight
-3. **Auto-detection** - KOShelf detects the new book and searches for the EPUB file
-4. **Auto-import** - If found, the EPUB is automatically copied to your library
-5. **Continuous sync** - All highlights and progress sync wirelessly via WebDAV
+### Option A: Syncthing Integration (Recommended)
+1. **Install KOReader Syncthing plugin** - Download and install on your KOReader device
+2. **Configure dual folder sync** - Sync both KOReader settings and documents directories
+3. **Start reading** - Books and highlights sync automatically in real-time
+4. **Auto-detection** - KOShelf detects new books and highlights automatically
 
 ### Option B: Manual Book Management
 1. **Copy EPUBs** - Manually place EPUB files in `./data/books/`
 2. **Transfer to device** - Copy books to your KOReader device
-3. **Configure sync** - Set up WebDAV in KOReader settings
-4. **Read and sync** - Highlights and progress sync automatically
+3. **Manual sync** - Periodically copy .sdr metadata files back
+4. **Read and manage** - Manual coordination of library updates
 
 ### Option C: Device Sync Scripts
 Use the included scripts for device-specific workflows:
@@ -60,35 +59,47 @@ Use the included scripts for device-specific workflows:
 ## Architecture
 
 ```
-┌─────────────────────┐    ┌──────────────────────┐    ┌─────────────────────┐
-│   KOShelf App       │    │   WebDAV Server      │    │  Nginx Proxy        │
-│ (ARM64 v1.0.20)     │    │ (Apache/bytemark)    │    │ (Static Delivery)   │
-│                     │    │                      │    │                     │
-│ • inotify watching  │    │ • KOReader sync      │    │ • Optimized serving │
-│ • Auto-detection    │    │ • Basic auth         │    │ • Gzip compression  │
-│ • Site generation   │    │ • Progress tracking  │    │ • Cache headers     │
-│ • SQLite stats      │    │ • Port 8081          │    │ • Port 3000         │
-│ • Auto-rebuild      │    │                      │    │                     │
-│ • Python3 server    │    │                      │    │                     │
-└─────────────────────┘    └──────────────────────┘    └─────────────────────┘
-          │                          │                          │
-          └──────────────────────────┼──────────────────────────┘
-                                     │
-                         ┌───────────▼───────────┐
-                         │  Persistent Volumes   │
-                         │ (Host Bind Mounts)    │
-                         │                       │
-                         │ • ./data/books/       │
-                         │ • ./data/site-output/ │
-                         │ • ./data/koreader-*   │
-                         └───────────────────────┘
+┌─────────────────────┐    ┌─────────────────────┐
+│   KOShelf App       │    │  Nginx Proxy        │
+│ (ARM64 v1.0.20)     │    │ (Static Delivery)   │
+│                     │    │                     │
+│ • inotify watching  │    │ • Optimized serving │
+│ • Auto-detection    │    │ • Gzip compression  │
+│ • Site generation   │    │ • Cache headers     │
+│ • SQLite stats      │    │ • Port 8090         │
+│ • Auto-rebuild      │    │                     │
+│ • Python3 server    │    │                     │
+└─────────────────────┘    └─────────────────────┘
+          │                          │
+          └──────────────────────────┘
+                     │
+         ┌───────────▼───────────┐
+         │  Persistent Volumes   │
+         │ (Host Bind Mounts)    │
+         │                       │
+         │ • ./data/books/       │
+         │ • ./data/site-output/ │
+         │ • ./data/koreader-*   │
+         └───────────────────────┘
+                     │
+         ┌───────────▼───────────┐
+         │   Syncthing Sync      │
+         │ (KOReader Device)     │
+         │                       │
+         │ • Real-time sync      │
+         │ • Bidirectional       │
+         │ • Auto-detection      │
+         │ • .sdr metadata       │
+         │ • Statistics DB       │
+         └───────────────────────┘
 ```
 
 ### Service Communication
 - **Internal Network**: Isolated `koshelf-network` bridge
-- **Dependency Chain**: nginx → koshelf → webdav
-- **Volume Sharing**: All services access shared data volumes
+- **Dependency Chain**: nginx → koshelf
+- **Volume Sharing**: Services access shared data volumes
 - **Health Monitoring**: Automatic container restart policies
+- **External Sync**: Syncthing handles KOReader device communication
 
 ## Custom Domain Setup (koshelf.books)
 
@@ -137,51 +148,80 @@ Once configured, access your library at: **http://koshelf.books**
 ### Note: Port Configuration
 This setup assumes KOShelf runs on port 8090 (instead of 3000) to avoid conflicts with Calibre on port 8080. The docker-compose.yml has been configured accordingly.
 
-## KOReader WebDAV Setup
+## KOReader Syncthing Setup
 
-### 1. Find Your Mac's IP Address
+### 1. Install Syncthing Plugin on KOReader
+Download the Syncthing plugin for KOReader and install it manually:
+
+1. **Download plugin**: Get the latest `syncthing.koplugin` from KOReader plugins repository
+2. **Install manually**: Copy to `/mnt/us/koreader/plugins/syncthing.koplugin` on your Kindle
+3. **Restart KOReader**: Plugin should appear in the Tools menu
+
+### 2. Configure Syncthing on Mac
 ```bash
-ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -1
+# Install Syncthing (if not already installed)
+brew install syncthing
+
+# Start Syncthing
+syncthing
 ```
 
-### 2. Configure KOReader
-In KOReader: **Settings → Network → Cloud storage → WebDAV**
-- **Address**: `http://YOUR_MAC_IP:8081`
-- **Username**: `koreader`
-- **Password**: `koreader123`
-- **Directory**: Leave empty or use `/`
+### 3. Set Up Dual Folder Sync
+Configure two separate sync folders for complete data synchronization:
 
-### 3. Test Connection
-- Tap **"Test"** to verify connectivity
-- Enable sync for reading progress, bookmarks, notes
+#### Folder 1: KOReader Settings
+- **Mac path**: `~/Code/koshelf/data/koreader-settings`
+- **Kindle path**: `/mnt/us/koreader/settings`
+- **Purpose**: Statistics database, configuration, reading progress
+
+#### Folder 2: Documents (Books + Metadata)
+- **Mac path**: `~/Code/koshelf/data/books`
+- **Kindle path**: `/mnt/us/documents`
+- **Purpose**: EPUB files and .sdr metadata directories with highlights
+
+### 4. Configure Ignore Patterns
+For both folders, use these ignore patterns:
+```
+/.syncthing/
+/.stfolder
+*.tmp
+*.sync
+*~
+.DS_Store
+DavLock*
+*-shm
+*-wal
+```
+
+### 5. Test Sync
+1. **Make a highlight** in KOReader
+2. **Check sync status** in Syncthing web UI
+3. **Verify files appear** in Mac directories
+4. **Confirm KOShelf updates** automatically
 
 ## Auto-Detection Feature
 
-KOShelf now automatically detects when you start reading new books downloaded via OPDS and attempts to find and import the corresponding EPUB files.
+KOShelf automatically detects when you start reading new books and when highlights are added through real-time Syncthing synchronization.
 
 ### How It Works
-1. **WebDAV Monitoring** - KOShelf watches the `koreader-settings/` directory for new `.sdr` metadata folders
-2. **Smart Search** - When a new book is detected, the auto-find script searches common locations:
-   - `/Volumes/Kindle/documents` (Kindle via USB)
-   - `/Volumes/*/documents` (Other e-readers via USB)
-   - `/mnt/*/documents` and `/media/*/documents` (Linux mount points)
-   - `~/Downloads` and `~/Documents` (Common download locations)
-3. **Automatic Import** - If found, the EPUB is automatically copied to your library
-4. **Instant Availability** - The book appears in your web library immediately
+1. **Syncthing Monitoring** - KOShelf watches the synced directories for file changes
+2. **Real-time Updates** - New .sdr metadata folders and highlight changes sync instantly
+3. **Automatic Regeneration** - Site updates immediately when new content is detected
+4. **Seamless Integration** - No manual intervention required for most workflows
 
-### Manual Fallback
-If auto-detection fails, you'll see helpful messages in the logs with:
-- Clear instructions for manual copying
-- Suggested locations to check
-- Commands to run for device-specific sync
+### What Gets Synced
+- **EPUB files** - Your entire book library
+- **Reading progress** - Statistics database with completion percentages
+- **.sdr metadata** - Complete highlight and annotation data
+- **Configuration** - KOReader settings and preferences
 
-### Monitoring Auto-Detection
+### Monitoring Sync Status
 ```bash
-# Watch for auto-detection events
-podman-compose logs -f koshelf | grep -E "New book detected|Auto-find"
+# Watch for sync events
+podman-compose logs -f koshelf | grep -E "file change detected|Site generated"
 
-# Check if both watchers are running
-podman-compose logs koshelf | grep "watcher PID"
+# Check Syncthing status
+open http://localhost:8384  # Mac Syncthing web UI
 ```
 
 ## Management Commands
@@ -205,8 +245,7 @@ podman-compose ps                 # Service status overview
 podman-compose top               # Container process information
 
 # Examine logs
-podman-compose logs koshelf      # KOShelf application logs
-podman-compose logs webdav       # WebDAV server logs  
+podman-compose logs koshelf      # KOShelf application logs only
 podman-compose logs nginx        # Nginx proxy logs
 podman-compose logs --tail=50 -f # Last 50 lines, follow mode
 ```

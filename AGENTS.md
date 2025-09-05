@@ -5,11 +5,11 @@ KOShelf is a containerized ebook library management system that generates static
 
 ## Core Architecture
 - **Application**: KOShelf v1.0.20 ARM64 binary with file watching and auto-detection
-- **Auto-Detection**: WebDAV monitoring for automatic EPUB import from OPDS downloads
-- **Synchronization**: Apache WebDAV server for KOReader devices  
+- **Auto-Detection**: Real-time Syncthing monitoring for automatic highlight and progress sync
+- **Synchronization**: Syncthing integration for KOReader devices  
 - **Web Server**: nginx reverse proxy for static site delivery
 - **Data**: Persistent volumes for books, generated sites, and sync data
-- **Orchestration**: Podman Compose with proper service dependencies
+- **Orchestration**: Podman Compose with streamlined service dependencies
 
 ## Build/Test Commands
 ```bash
@@ -22,7 +22,6 @@ podman-compose restart koshelf          # Restart KOShelf (triggers rebuild)
 # Monitoring and debugging
 podman-compose logs -f                  # Follow all logs
 podman-compose logs koshelf             # KOShelf app logs only
-podman-compose logs webdav              # WebDAV server logs
 podman-compose ps                       # Service status overview
 podman-compose top                      # Container processes
 
@@ -43,9 +42,6 @@ koshelf/
 │   ├── nginx/                      # Static site proxy
 │   │   ├── Dockerfile              # nginx:alpine configuration
 │   │   └── default.conf            # Optimized static serving
-│   └── webdav/                     # WebDAV server for KOReader
-│       ├── Dockerfile              # bytemark/webdav customization
-│       └── nginx.conf              # WebDAV-specific config
 ├── data/                           # Persistent data volumes
 │   ├── books/                      # EPUB library (user content)
 │   ├── koreader-settings/          # Sync data & reading statistics
@@ -112,47 +108,48 @@ koshelf/
 - Backup strategies for critical user data
 - Clear separation of application and user data
 
-## Auto-Detection System
+## Syncthing Integration System
 
 ### Architecture
-The auto-detection system monitors KOReader WebDAV sync data to automatically import EPUBs when users start reading OPDS-downloaded books.
+The Syncthing integration provides real-time bidirectional sync between KOReader devices and the KOShelf library.
 
 ### Key Components
-1. **WebDAV Watcher**: Monitors `koreader-settings/` for new `.sdr` metadata folders
-2. **Auto-Find Script**: Searches mounted devices and common locations for EPUBs
-3. **Smart Matching**: Handles filename variations and case sensitivity
-4. **Fallback Logging**: Provides clear guidance when auto-detection fails
+1. **Dual Folder Sync**: Separate sync for settings and documents directories
+2. **Real-time Monitoring**: inotify watchers detect changes instantly
+3. **Smart Conflict Resolution**: Syncthing handles file conflicts gracefully
+4. **Auto-regeneration**: Site updates automatically when content changes
 
 ### Implementation Details
-- **Detection Trigger**: New `.sdr` directory creation in WebDAV sync folder
-- **Search Strategy**: Prioritized search through common device mount points
-- **File Handling**: Automatic copying with filename normalization
-- **Error Recovery**: Graceful degradation with user guidance
+- **Settings Sync**: `/mnt/us/koreader/settings/` ↔ `~/Code/koshelf/data/koreader-settings/`
+  - Statistics database (reading progress, highlight counts)
+  - KOReader configuration and preferences
+- **Documents Sync**: `/mnt/us/documents/` ↔ `~/Code/koshelf/data/books/`
+  - EPUB files and .sdr metadata directories
+  - Complete highlight and annotation content
+- **File Handling**: Automatic sync with configurable ignore patterns
+- **Error Recovery**: Graceful handling of sync conflicts and network issues
 
-### Search Locations (Priority Order)
-1. `/Volumes/Kindle/documents` - Kindle via USB
-2. `/Volumes/*/documents` - Other e-readers via USB
-3. `/mnt/*/documents` - Linux mount points
-4. `/media/*/documents` - Alternative Linux mounts
-5. `~/Downloads` - Common download location
-6. `~/Documents` - Documents folder
+### Sync Locations
+1. **KOReader Settings Directory** - Configuration and statistics
+2. **Documents Directory** - EPUBs and metadata (.sdr folders)
+3. **Bidirectional Sync** - Changes flow both ways seamlessly
+4. **Real-time Updates** - No manual intervention required
 
 ### Configuration
-- **Watch Interval**: Configurable via `KOSHELF_WATCH_INTERVAL`
-- **Search Paths**: Extensible in `auto-find-book.sh`
-- **Matching Logic**: Supports exact, case-insensitive, and partial matches
-- **Logging Level**: Detailed output for debugging auto-detection issues
+- **Ignore Patterns**: Configured to avoid syncing temporary and system files
+- **Conflict Resolution**: Syncthing handles file conflicts automatically
+- **Monitoring**: File watchers trigger immediate site regeneration
+- **Security**: Local network sync with device authentication
 
 ## Testing & Validation
 
 ### Manual Testing Procedures
 1. **Container Health**: `podman-compose ps` - all services running
 2. **Web Interface**: Access http://koshelf.books (or http://localhost:8090)
-3. **WebDAV Connectivity**: `curl -u koreader:koreader123 http://localhost:8081/`
+3. **Syncthing Status**: Check sync status at http://localhost:8384
 4. **File Watching**: Add EPUB to `data/books/`, verify regeneration
-5. **Auto-Detection**: Create test .sdr folder in `data/koreader-settings/`, verify detection
-6. **KOReader Sync**: Test device connection and sync functionality
-7. **Domain Resolution**: `nslookup koshelf.books` should resolve to 192.168.1.150
+5. **Sync Testing**: Make highlight on device, verify sync and regeneration
+6. **Domain Resolution**: `nslookup koshelf.books` should resolve to 192.168.1.150
 
 ### Debugging Workflows
 1. **Log Analysis**: Start with `podman-compose logs -f`
@@ -162,9 +159,9 @@ The auto-detection system monitors KOReader WebDAV sync data to automatically im
 5. **Resource Monitoring**: Use `podman stats` for performance issues
 
 ### Common Issues & Solutions
-- **Port Conflicts**: Check for existing services on 8090/8081 (Calibre uses 8080)
+- **Port Conflicts**: Check for existing services on port 8090 (Calibre uses 8080)
 - **File Permissions**: Ensure EPUB files are readable by container
-- **Network Isolation**: Verify devices on same subnet for WebDAV
+- **Syncthing Issues**: Verify Syncthing is running and devices are connected
 - **Resource Limits**: Monitor container memory/CPU usage
 - **Volume Mounts**: Validate bind mount paths and permissions
 - **Domain Access**: Ensure Pi-hole DNS and nginx reverse proxy are configured
@@ -191,6 +188,7 @@ The auto-detection system monitors KOReader WebDAV sync data to automatically im
   - KOShelf on port 8090 (containerized)
   - Calibre on port 8080 (native)
   - nginx reverse proxy on port 80 (for domain access)
+  - Syncthing on port 8384 (for device sync management)
 - **DNS Setup**: Pi-hole at 192.168.1.100 resolves koshelf.books
 - **Access**: http://koshelf.books (no port needed)
 

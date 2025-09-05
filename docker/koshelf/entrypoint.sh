@@ -90,21 +90,40 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
     done &
     KOREADER_WATCHER_PID=$!
     
+    # Start watcher for statistics database (reading progress sync)
+    echo "Starting watcher for statistics database..."
+    if [ -f "$STATISTICS_DB" ] || [ -d "$(dirname "$STATISTICS_DB")" ]; then
+        inotifywait -m -e modify,create --format '%w%f %e' "$STATISTICS_DB" 2>/dev/null | while read file event; do
+            echo "Statistics database updated: $file ($event)"
+            sleep "$WATCH_INTERVAL"
+            generate_site
+        done &
+        STATS_WATCHER_PID=$!
+    else
+        echo "Statistics database path not accessible, skipping stats watcher"
+        STATS_WATCHER_PID=""
+    fi
+    
     # Start simple HTTP server for the generated site
     echo "Starting HTTP server on port $PORT..."
     cd "$OUTPUT_DIR"
     python3 -m http.server "$PORT" &
     SERVER_PID=$!
     
-    trap "kill $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $SERVER_PID 2>/dev/null || true; exit" SIGTERM SIGINT
+    trap "kill $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID ${STATS_WATCHER_PID:-} $SERVER_PID 2>/dev/null || true; exit" SIGTERM SIGINT
     
     echo "KoShelf is ready!"
     echo "Books watcher PID: $BOOKS_WATCHER_PID"
     echo "KOReader watcher PID: $KOREADER_WATCHER_PID"
+    echo "Statistics watcher PID: ${STATS_WATCHER_PID:-disabled}"
     echo "HTTP server PID: $SERVER_PID"
     echo "Access your library at: http://localhost:$PORT"
     
-    wait $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $SERVER_PID
+    if [ -n "$STATS_WATCHER_PID" ]; then
+        wait $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $STATS_WATCHER_PID $SERVER_PID
+    else
+        wait $BOOKS_WATCHER_PID $KOREADER_WATCHER_PID $SERVER_PID
+    fi
 else
     echo "Watch mode disabled. Generating site once..."
     generate_site
