@@ -222,9 +222,10 @@ The auto-regeneration system uses a sophisticated approach to handle the limitat
 
 ### What Gets Synced
 - **EPUB files** - Your entire book library in `/mnt/us/documents`
-- **Reading progress** - Progress data stored in .sdr metadata files
+- **Reading progress** - Progress data stored in .sdr metadata files (no separate database sync needed)
 - **.sdr metadata** - Complete highlight and annotation data alongside each book
-- **Reading statistics** - Session data and reading metrics within .sdr files
+- **Reading statistics** - Session data and reading metrics embedded within .sdr files
+- **Note**: The statistics database (`statistics.sqlite3`) is computed from .sdr files by KOShelf and doesn't need separate syncing
 
 ### Monitoring Auto-Regeneration
 ```bash
@@ -462,7 +463,7 @@ podman-compose up -d
 KOSHELF_WATCH_MODE=true                    # Enable file watching
 KOSHELF_OUTPUT_DIR=/app/site-output        # Generated site location
 KOSHELF_BOOKS_DIR=/app/books               # EPUB library path
-KOSHELF_STATISTICS_DB=/app/books/statistics.sqlite3  # Statistics in books directory
+KOSHELF_STATISTICS_DB=/app/koreader-settings/data/statistics.sqlite3  # Computed statistics cache
 KOSHELF_WATCH_INTERVAL=5                   # Seconds between inotify checks
 POLL_INTERVAL=30                           # Seconds between polling checks (backup detection)
 KOSHELF_TITLE="KoShelf Library"            # Site title
@@ -480,15 +481,32 @@ PASSWORD=koreader123                       # WebDAV password
 ├── books/                          # EPUB library and metadata (bind mount)
 │   ├── *.epub                      # Book files
 │   └── *.sdr/                      # KOReader metadata directories
-│       ├── metadata.epub.lua       # Book metadata and highlights
-│       ├── statistics.epub.lua     # Reading statistics
+│       ├── metadata.epub.lua       # Book metadata, highlights, and reading progress
+│       ├── statistics.epub.lua     # Reading session statistics
 │       └── metadata.epub.lua.old   # Backup metadata
 ├── koreader-settings/              # Legacy sync data (not actively used)
+│   └── data/
+│       └── statistics.sqlite3      # Computed statistics database (not synced)
 └── site-output/                    # Generated static website
     ├── index.html                  # Main library page
     ├── books/                      # Individual book pages
     ├── assets/                     # CSS, JS, images
     └── search/                     # Search functionality
+```
+
+### Statistics Data Flow
+```
+KOReader Device Reading Session
+    ↓
+.sdr/metadata.epub.lua files (source of truth)
+    ↓
+Syncthing sync to data/books/
+    ↓
+KOShelf extracts statistics during site generation
+    ↓
+statistics.sqlite3 database (computed cache)
+    ↓
+Statistics and Calendar pages in generated site
 ```
 
 ### Network Architecture
