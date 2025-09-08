@@ -166,17 +166,24 @@ brew install syncthing
 syncthing
 ```
 
-### 3. Set Up Documents Folder Sync
-Configure Syncthing to sync your KOReader documents directory with your KOShelf library:
+### 3. Set Up Two-Folder Sync (Required)
+Configure Syncthing to sync BOTH directories for complete functionality:
 
-#### Documents (Books + Metadata)
+#### Folder 1: Documents (Books + Metadata)
 - **Mac path**: `~/Code/koshelf/data/books`
 - **Kindle path**: `/mnt/us/documents`
-- **Purpose**: EPUB files and .sdr metadata directories with highlights, reading progress, and statistics
+- **Purpose**: EPUB files and .sdr metadata directories with highlights, reading progress
 - **Type**: Receive Only (Mac receives changes from Kindle)
 
+#### Folder 2: Settings (Statistics Database)
+- **Mac path**: `~/Code/koshelf/data/koreader-settings`
+- **Kindle path**: `/mnt/us/koreader/settings`
+- **Purpose**: Statistics database, app settings, reading calendar data
+- **Type**: Receive Only (Mac receives changes from Kindle)
+- **Important**: Create symlink `data/statistics.sqlite3 → ../statistics.sqlite3` for KOShelf compatibility
+
 ### 4. Configure Ignore Patterns
-For the documents folder, use these ignore patterns:
+For both folders, use these ignore patterns:
 ```
 /.syncthing/
 /.stfolder
@@ -222,10 +229,11 @@ The auto-regeneration system uses a sophisticated approach to handle the limitat
 
 ### What Gets Synced
 - **EPUB files** - Your entire book library in `/mnt/us/documents`
-- **Reading progress** - Progress data stored in .sdr metadata files (no separate database sync needed)
+- **Reading progress** - Progress data stored in .sdr metadata files
 - **.sdr metadata** - Complete highlight and annotation data alongside each book
-- **Reading statistics** - Session data and reading metrics embedded within .sdr files
-- **Note**: The statistics database (`statistics.sqlite3`) is computed from .sdr files by KOShelf and doesn't need separate syncing
+- **Reading statistics** - Session data from statistics database in settings directory
+- **Statistics database** - `statistics.sqlite3` for calendar and reading analytics (requires symlink setup)
+- **Note**: Both books directory (.sdr files) AND settings directory (database) sync are required for complete functionality
 
 ### Monitoring Auto-Regeneration
 ```bash
@@ -321,6 +329,51 @@ koshelf/
 ```
 
 ## Troubleshooting
+
+### Case Sensitivity Issues (Common)
+Syncthing and KOShelf have specific requirements for file extensions:
+
+1. **File Extension Requirements**:
+   - KOShelf expects lowercase: `.epub` and `metadata.epub.lua`
+   - Mixed case causes sync conflicts and excludes books from site generation
+
+2. **Resolving Case Sensitivity Conflicts**:
+   ```bash
+   # Find conflict files
+   find ./data/books -name "*sync-conflict*" -o -name "*.syncthing*"
+   
+   # Remove conflict files (after backing up if needed)
+   find ./data/books -name "*sync-conflict*" -delete
+   find ./data/books -name "*.syncthing*" -delete
+   
+   # Standardize to lowercase extensions
+   find ./data/books -name "*.EPUB" -exec rename 's/\.EPUB$/\.epub/' {} \;
+   find ./data/books -name "metadata.EPUB.lua" -exec rename 's/metadata\.EPUB\.lua/metadata.epub.lua/' {} \;
+   ```
+
+3. **Prevent Future Conflicts**:
+   - Use Syncthing's "Override Changes" on the receive-only device (Mac) when conflicts occur
+   - Ensure new books use lowercase `.epub` extensions before syncing
+
+### Statistics Database Issues
+If reading statistics or calendar pages show outdated data:
+
+1. **Verify Two-Folder Sync**: Both `koreader-books` and `koreader-settings` must be syncing
+2. **Check Database Location**: 
+   ```bash
+   # Verify symlink exists
+   ls -la ./data/koreader-settings/data/statistics.sqlite3
+   
+   # Create symlink if missing
+   cd ./data/koreader-settings/data
+   ln -sf ../statistics.sqlite3 statistics.sqlite3
+   ```
+3. **Compare Database Timestamps**:
+   ```bash
+   # Check modification times
+   ls -la ./data/koreader-settings/statistics.sqlite3
+   ls -la [device]/koreader/settings/statistics.sqlite3
+   ```
 
 ### KOReader Connectivity Issues
 1. **Network Discovery**:
@@ -484,9 +537,10 @@ PASSWORD=koreader123                       # WebDAV password
 │       ├── metadata.epub.lua       # Book metadata, highlights, and reading progress
 │       ├── statistics.epub.lua     # Reading session statistics
 │       └── metadata.epub.lua.old   # Backup metadata
-├── koreader-settings/              # Legacy sync data (not actively used)
+├── koreader-settings/              # KOReader settings and statistics database
+│   ├── statistics.sqlite3          # Current statistics database (synced from device)
 │   └── data/
-│       └── statistics.sqlite3      # Computed statistics database (not synced)
+│       └── statistics.sqlite3      # Symlink to ../statistics.sqlite3 (KOShelf compatibility)
 └── site-output/                    # Generated static website
     ├── index.html                  # Main library page
     ├── books/                      # Individual book pages
@@ -498,13 +552,13 @@ PASSWORD=koreader123                       # WebDAV password
 ```
 KOReader Device Reading Session
     ↓
-.sdr/metadata.epub.lua files (source of truth)
+.sdr/metadata.epub.lua files (highlights, progress)
     ↓
-Syncthing sync to data/books/
+statistics.sqlite3 database (reading statistics, calendar)
     ↓
-KOShelf extracts statistics during site generation
+Syncthing sync to data/books/ and data/koreader-settings/
     ↓
-statistics.sqlite3 database (computed cache)
+KOShelf reads both sources during site generation
     ↓
 Statistics and Calendar pages in generated site
 ```
