@@ -69,9 +69,13 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
     # Generate initial site
     generate_site
     
-    # Start file watcher for books directory
+    # Start file watcher for books directory (exclude hidden/temp files and output directory)
     echo "Starting file watcher for books directory..."
-    inotifywait -m -r -e create,delete,modify,move --format '%w%f %e' "$BOOKS_DIR" 2>/dev/null | while read file event; do
+    inotifywait -m -r -e create,delete,modify,move --exclude '/\.|\.tmp$|\.temp$' --format '%w%f %e' "$BOOKS_DIR" 2>/dev/null | while read file event; do
+        # Skip if the event is in the output directory or involves temporary files
+        if [[ "$file" == *"$OUTPUT_DIR"* ]] || [[ "$file" == *".tmp"* ]] || [[ "$file" == *".temp"* ]] || [[ "$file" == */.*/* ]]; then
+            continue
+        fi
         echo "Book file change detected: $file ($event)"
         sleep "$WATCH_INTERVAL"
         generate_site
@@ -80,12 +84,20 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
     
     # Start watcher for KOReader settings directory (new book detection)
     echo "Starting watcher for KOReader settings directory..."
-    inotifywait -m -r -e create --format '%w%f %e' "$KOREADER_SETTINGS_DIR" 2>/dev/null | while read file event; do
-        # Check if this is a new .sdr directory creation
+    inotifywait -m -r -e create,modify --exclude '/\.|\.tmp$|\.temp$' --format '%w%f %e' "$KOREADER_SETTINGS_DIR" 2>/dev/null | while read file event; do
+        # Skip temporary/hidden files and output directory
+        if [[ "$file" == *"$OUTPUT_DIR"* ]] || [[ "$file" == *".tmp"* ]] || [[ "$file" == *".temp"* ]] || [[ "$file" == */.*/* ]]; then
+            continue
+        fi
+        # Check if this is a new .sdr directory creation or important file modification
         if [[ "$file" == *.sdr ]] && [ "$event" = "CREATE" ]; then
             echo "New .sdr directory detected: $file"
             handle_new_book "$file"
             # Give it a moment for the .sdr to be fully created, then regenerate
+            sleep "$WATCH_INTERVAL"
+            generate_site
+        elif [[ "$file" == *.lua ]] || [[ "$file" == *.sqlite3 ]]; then
+            echo "KOReader data change detected: $file ($event)"
             sleep "$WATCH_INTERVAL"
             generate_site
         fi
@@ -96,9 +108,12 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
     echo "Starting watcher for statistics database..."
     if [ -f "$STATISTICS_DB" ] || [ -d "$(dirname "$STATISTICS_DB")" ]; then
         inotifywait -m -e modify,create --format '%w%f %e' "$STATISTICS_DB" 2>/dev/null | while read file event; do
-            echo "Statistics database updated: $file ($event)"
-            sleep "$WATCH_INTERVAL"
-            generate_site
+            # Only trigger on actual database changes, not temporary files
+            if [[ "$file" == *".sqlite3" ]] && [[ "$file" != *".tmp"* ]] && [[ "$file" != *".temp"* ]]; then
+                echo "Statistics database updated: $file ($event)"
+                sleep "$WATCH_INTERVAL"
+                generate_site
+            fi
         done &
         STATS_WATCHER_PID=$!
     else
@@ -109,9 +124,19 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
     # Start backup polling mechanism (for macOS Docker bind mount issues)
     echo "Starting backup polling mechanism (every ${POLL_INTERVAL}s)..."
     (
-        LAST_BOOKS_COUNT=0
-        LAST_SDR_COUNT=0
-        LAST_SDR_MTIME=0
+        # Initialize baseline values after initial generation to avoid false positives
+        sleep 2
+        LAST_BOOKS_COUNT=$(find "$BOOKS_DIR" -name "*.epub" 2>/dev/null | wc -l)
+        LAST_SDR_COUNT=$(find "$BOOKS_DIR" -name "*.sdr" -type d 2>/dev/null | wc -l)
+        LAST_SDR_MTIME=$(find "$BOOKS_DIR" -name "*.sdr" -type d -exec find {} -type f \; 2>/dev/null | xargs stat -c %Y 2>/dev/null | sort -n | tail -1 || echo 0)
+        if [ -f "$STATISTICS_DB" ]; then
+            LAST_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
+        else
+            LAST_STATS_MTIME=0
+        fi
+        
+        echo "Polling baseline initialized: $LAST_BOOKS_COUNT books, $LAST_SDR_COUNT .sdr dirs"
+        
         while true; do
             sleep "$POLL_INTERVAL"
             
@@ -136,7 +161,7 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
             # Check for .sdr directory content changes (highlight files, metadata)
             CURRENT_SDR_MTIME=$(find "$BOOKS_DIR" -name "*.sdr" -type d -exec find {} -type f \; 2>/dev/null | xargs stat -c %Y 2>/dev/null | sort -n | tail -1 || echo 0)
             if [ "$CURRENT_SDR_MTIME" -gt "$LAST_SDR_MTIME" ]; then
-                echo "Polling detected .sdr content change (newest file: $(date -d @$CURRENT_SDR_MTIME))"
+                echo "Polling detected .sdr content change (newest file: $(date -d @$CURRENT_SDR_MTIME 2>/dev/null || date))"
                 LAST_SDR_MTIME=$CURRENT_SDR_MTIME
                 generate_site
                 continue
@@ -145,7 +170,7 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
             # Check for statistics database changes
             if [ -f "$STATISTICS_DB" ]; then
                 CURRENT_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
-                if [ "${LAST_STATS_MTIME:-0}" -ne "$CURRENT_STATS_MTIME" ]; then
+                if [ "$CURRENT_STATS_MTIME" -gt "$LAST_STATS_MTIME" ]; then
                     echo "Polling detected statistics database change"
                     LAST_STATS_MTIME=$CURRENT_STATS_MTIME
                     generate_site

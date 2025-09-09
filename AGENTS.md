@@ -93,11 +93,12 @@ koshelf/
 - **inotify Watchers**: Primary detection method for real-time file system events
 - **Backup Polling**: Secondary detection (configurable interval, default 30s) for macOS Docker compatibility
 - **Enhanced Content Detection**: Monitors both directory creation AND file modifications within .sdr folders
-- **Event Filtering**: Focus on create, delete, modify, move events
+- **Event Filtering**: Focus on create, delete, modify, move events with exclusion of temporary and output files
 - **Auto-detection Triggers**: New .sdr folder creation, EPUB additions, highlight updates
 - **Graceful Handling**: Robust handling of rapid file changes and file system limitations
 - **macOS Compatibility**: Polling mechanism ensures reliable detection with Docker bind mounts
 - **Cross-platform**: Works on Linux (primarily inotify) and macOS (primarily polling)
+- **Feedback Loop Prevention**: Excludes output directories and temporary files to prevent infinite rebuild cycles
 
 ### Container Communication
 - Internal bridge networks for service isolation
@@ -292,6 +293,9 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - Check symlink: `data/statistics.sqlite3` should point to `../statistics.sqlite3`
   - Compare modification times between device and local statistics databases
 - **Auto-Regeneration Not Working**: Check both inotify watchers AND polling are running
+  - Common cause: Feedback loop from watchers monitoring output directory (fixed in latest version)
+  - Test with: Add/remove EPUB file, check logs for "Polling detected book count change"
+  - Verify baseline initialization: Look for "Polling baseline initialized" in logs
 - **macOS Docker Bind Mount Issues**: Polling provides backup detection when inotify fails
 - **Resource Limits**: Monitor container memory/CPU usage
 - **Volume Mounts**: Validate bind mount paths and permissions
@@ -353,6 +357,10 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
 - **Validate Container State**: Ensure watchers survive container restarts
 - **Platform Considerations**: Remember macOS relies more heavily on polling
 - **Timeout Issues**: Check if polling interval needs adjustment for large libraries
+- **Feedback Loop Detection**: If seeing constant rebuilds every 30s, check for feedback loops
+  - Fixed in current version with proper exclusion filters for output directories and temp files
+  - Look for "Polling baseline initialized" message indicating proper startup
+  - Test detection with: `cp book.epub test.epub && rm test.epub` to verify polling works
 
 ### When Debugging Syncthing Issues
 - **Case Sensitivity**: Look for mixed .epub/.EPUB extension conflicts
