@@ -191,6 +191,9 @@ Statistics/Calendar pages
 - Monitor Syncthing for case sensitivity conflicts with file extensions
 - Check both statistics database sources for most recent modification times
 - Statistics pages require actual database sync, not just .sdr file regeneration
+- **Critical**: Check `.stignore` files - default configuration excludes SQLite WAL files (`*-shm`, `*-wal`)
+- **SQLite WAL Files**: Recent database changes stored in WAL files that may be ignored by Syncthing
+- **Two-Phase Sync**: .sdr files sync immediately, statistics database updates may be delayed by KOReader
 
 ## Auto-Regeneration System
 
@@ -292,6 +295,10 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - Verify `koreader-settings` folder is syncing via Syncthing (look for `.syncthing` folder)
   - Check symlink: `data/statistics.sqlite3` should point to `../statistics.sqlite3`
   - Compare modification times between device and local statistics databases
+  - **CRITICAL**: Check `.stignore` files exclude SQLite WAL/SHM files (`*-wal`, `*-shm`)
+  - Remove WAL/SHM ignore patterns to allow recent database changes to sync
+  - Force WAL checkpoint: `sqlite3 statistics.sqlite3 "PRAGMA wal_checkpoint(FULL);"`
+  - **Two-phase issue**: Highlights sync immediately (.sdr), statistics database updates delayed
 - **Auto-Regeneration Not Working**: Check both inotify watchers AND polling are running
   - Common cause: Feedback loop from watchers monitoring output directory (fixed in latest version)
   - Test with: Add/remove EPUB file, check logs for "Polling detected book count change"
@@ -349,6 +356,12 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
 - **Compare Timestamps**: Check modification times on both device and local statistics databases
 - **Monitor Syncthing Conflicts**: Watch for case sensitivity issues with .epub/.EPUB extensions
 - **Verify Sync Status**: Check for `.syncthing` folders in both synced directories
+- **CRITICAL .stignore Issue**: Default `.stignore` files exclude SQLite WAL/SHM files (`*-wal`, `*-shm`)
+  - Remove these patterns from both device and local `.stignore` files
+  - SQLite WAL files contain recent database changes that won't sync if ignored
+  - This causes statistics/calendar to show stale data while highlights update correctly
+- **Two-Phase Data Flow**: .sdr files (highlights) sync immediately, statistics database updates are batched/delayed by KOReader
+- **Force Database Updates**: Restart KOReader completely to force statistics commit to database
 
 ### When Debugging Auto-Regeneration Issues
 - **Check Both Systems**: Verify both inotify and polling processes are running
