@@ -459,6 +459,33 @@ If reading statistics or calendar pages show outdated data:
    podman exec -it koshelf-app ls -la /app/site-output/
    ```
 
+### Statistics and Calendar Page Issues  
+1. **Stale Reading Statistics**:
+   ```bash
+   # Check if statistics database is syncing from device
+   ls -la data/koreader-settings/statistics.sqlite3
+   
+   # Compare with device database when connected
+   ls -la /Volumes/Kindle/koreader/settings/statistics.sqlite3
+   
+   # Test auto-regeneration detection
+   touch data/koreader-settings/statistics.sqlite3 && sleep 35
+   podman-compose logs --tail=10 koshelf | grep -E "Statistics database change detected|Site generated"
+   
+   # Manual sync if needed (replace Kindle path as appropriate)
+   cp /Volumes/Kindle/koreader/settings/statistics.sqlite3 data/koreader-settings/statistics.sqlite3
+   podman-compose restart koshelf
+   ```
+
+2. **Auto-Detection Not Working**:
+   ```bash
+   # Rebuild container with latest fixes
+   podman-compose build --no-cache koshelf && podman-compose up -d
+   
+   # Monitor detection logs
+   podman-compose logs -f koshelf | grep -E "Statistics database tracking|Polling baseline"
+   ```
+
 ### WebDAV Synchronization Issues
 1. **Authentication Testing**:
    ```bash

@@ -106,18 +106,21 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
     
     # Start watcher for statistics database (reading progress sync)
     echo "Starting watcher for statistics database..."
-    if [ -f "$STATISTICS_DB" ] || [ -d "$(dirname "$STATISTICS_DB")" ]; then
-        inotifywait -m -e modify,create --format '%w%f %e' "$STATISTICS_DB" 2>/dev/null | while read file event; do
+    # Watch the directory containing the database instead of the symlinked file
+    STATS_DIR="$(dirname "$STATISTICS_DB")"
+    if [ -d "$KOREADER_SETTINGS_DIR" ]; then
+        # Watch both the settings directory and the data subdirectory for database changes
+        inotifywait -m -e modify,create,move --format '%w%f %e' "$KOREADER_SETTINGS_DIR" "$STATS_DIR" 2>/dev/null | while read file event; do
             # Only trigger on actual database changes, not temporary files
-            if [[ "$file" == *".sqlite3" ]] && [[ "$file" != *".tmp"* ]] && [[ "$file" != *".temp"* ]]; then
-                echo "Statistics database updated: $file ($event)"
+            if [[ "$file" == *"statistics.sqlite3"* ]] && [[ "$file" != *".tmp"* ]] && [[ "$file" != *".temp"* ]] && [[ "$file" != *"-shm"* ]] && [[ "$file" != *"-wal"* ]]; then
+                echo "Statistics database change detected: $file ($event)"
                 sleep "$WATCH_INTERVAL"
                 generate_site
             fi
         done &
         STATS_WATCHER_PID=$!
     else
-        echo "Statistics database path not accessible, skipping stats watcher"
+        echo "KOReader settings directory not accessible, skipping stats watcher"
         STATS_WATCHER_PID=""
     fi
     
@@ -128,14 +131,22 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
         sleep 2
         LAST_BOOKS_COUNT=$(find "$BOOKS_DIR" -name "*.epub" 2>/dev/null | wc -l)
         LAST_SDR_COUNT=$(find "$BOOKS_DIR" -name "*.sdr" -type d 2>/dev/null | wc -l)
-        # No longer need LAST_SDR_MTIME with simplified approach
+        # Initialize statistics database tracking for both symlink and real file
         if [ -f "$STATISTICS_DB" ]; then
             LAST_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
         else
             LAST_STATS_MTIME=0
         fi
         
+        REAL_STATS_DB="$KOREADER_SETTINGS_DIR/statistics.sqlite3"
+        if [ -f "$REAL_STATS_DB" ]; then
+            LAST_REAL_STATS_MTIME=$(stat -c %Y "$REAL_STATS_DB" 2>/dev/null || echo 0)
+        else
+            LAST_REAL_STATS_MTIME=0
+        fi
+        
         echo "Polling baseline initialized: $LAST_BOOKS_COUNT books, $LAST_SDR_COUNT .sdr dirs"
+        echo "Statistics database tracking: symlink mtime=$LAST_STATS_MTIME, real file mtime=$LAST_REAL_STATS_MTIME"
         
         while true; do
             sleep "$POLL_INTERVAL"
@@ -167,14 +178,32 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
                 continue
             fi
             
-            # Check for statistics database changes
+            # Check for statistics database changes (watch both symlink target and link itself)
+            STATS_CHANGED=false
             if [ -f "$STATISTICS_DB" ]; then
                 CURRENT_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
                 if [ "$CURRENT_STATS_MTIME" -gt "$LAST_STATS_MTIME" ]; then
-                    echo "Polling detected statistics database change"
+                    echo "Polling detected statistics database change (symlink target)"
                     LAST_STATS_MTIME=$CURRENT_STATS_MTIME
-                    generate_site
+                    STATS_CHANGED=true
                 fi
+            fi
+            
+            # Also check the actual database file in case symlink doesn't update properly
+            REAL_STATS_DB="$KOREADER_SETTINGS_DIR/statistics.sqlite3"
+            if [ -f "$REAL_STATS_DB" ]; then
+                CURRENT_REAL_STATS_MTIME=$(stat -c %Y "$REAL_STATS_DB" 2>/dev/null || echo 0)
+                if [ -z "$LAST_REAL_STATS_MTIME" ]; then
+                    LAST_REAL_STATS_MTIME=$CURRENT_REAL_STATS_MTIME
+                elif [ "$CURRENT_REAL_STATS_MTIME" -gt "$LAST_REAL_STATS_MTIME" ]; then
+                    echo "Polling detected statistics database change (real file)"
+                    LAST_REAL_STATS_MTIME=$CURRENT_REAL_STATS_MTIME
+                    STATS_CHANGED=true
+                fi
+            fi
+            
+            if [ "$STATS_CHANGED" = true ]; then
+                generate_site
             fi
         done
     ) &

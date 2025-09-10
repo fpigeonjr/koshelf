@@ -356,6 +356,12 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - SQLite WAL (Write-Ahead Log) files contain recent database changes that must sync
   - Without WAL sync: highlights update immediately (.sdr files) but statistics/calendar show stale data
   - **Fix**: Edit `.stignore` on both device and local, remove WAL exclusions, force resync
+- **NEW: Database Sync Detection Issues** - Statistics/calendar pages showing stale data despite Syncthing working:
+  - **Immediate Check**: Compare database timestamps: `ls -la data/koreader-settings/statistics.sqlite3` vs Kindle file
+  - **Auto-Detection Test**: `touch data/koreader-settings/statistics.sqlite3 && sleep 35` - should trigger regeneration
+  - **Manual Sync**: If timestamps differ, copy newer file: `cp /Volumes/Kindle/koreader/settings/statistics.sqlite3 data/koreader-settings/statistics.sqlite3`
+  - **Container Rebuild**: If detection still fails: `podman-compose build --no-cache koshelf && podman-compose up -d`
+  - **Look for Logs**: "Statistics database tracking" and "Statistics database change detected" messages
 - **Verify Two-Folder Sync**: Confirm both `koreader-books` and `koreader-settings` folders are syncing
 - **Check Database Location**: KOReader writes to root `statistics.sqlite3`, KOShelf reads from `data/statistics.sqlite3`
 - **Validate Symlink**: Ensure `data/statistics.sqlite3` symlinks to `../statistics.sqlite3`
@@ -370,7 +376,7 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
 - **Check Both Systems**: Verify both inotify and polling processes are running (should see 4-5 watchers)
   - Use: `podman exec koshelf ps aux | grep -E "inotifywait|backup_poll"`
 - **Monitor Detection Logs**: Use specific grep patterns to filter for detection events
-  - Use: `podman-compose logs -f koshelf | grep -E "file change detected|Polling detected|Site generated"`
+  - Use: `podman-compose logs -f koshelf | grep -E "file change detected|Polling detected|Statistics database change detected|Site generated"`
 - **Test Each System**: Manually trigger file changes to test detection
   - Test: `touch data/books/test.epub && rm data/books/test.epub`
 - **Validate Container State**: Ensure watchers survive container restarts
@@ -380,9 +386,17 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - **Solution**: Replaced with simple time-based detection `find ... -newermt "$POLL_INTERVAL seconds ago"`  
   - **Fixed: WAL File Exclusion** - `.stignore` files excluding SQLite WAL files prevented statistics sync
   - **Fixed: Feedback Loops** - Watchers monitoring output directories causing constant rebuilds
+- **SEPTEMBER 2025 STATISTICS SYNC FIXES**:
+  - **Fixed: Statistics Database Watcher Failure** - inotifywait was watching symlinked file directly, which doesn't trigger reliably in containers
+  - **Solution**: Now watches both settings directory AND data subdirectory for database changes
+  - **Fixed: Incomplete Polling Coverage** - Only watched symlink target, missing changes to actual database file  
+  - **Solution**: Dual tracking of both symlink (`data/statistics.sqlite3`) and real file (`statistics.sqlite3`) timestamps
+  - **Enhanced: Detection Logging** - Added detailed logging to distinguish between symlink and real file changes
+  - **Improved: Event Filtering** - Excludes WAL/SHM files to prevent noise while allowing actual database changes
 - **Current Status Verification**:
   - Look for "Polling baseline initialized" message indicating proper startup
-  - Check for simplified polling success: `podman-compose logs koshelf | grep "backup_poll"`
+  - Look for "Statistics database tracking: symlink mtime=X, real file mtime=Y" message
+  - Check for both "Statistics database change detected" (inotify) and "Polling detected statistics database change" (polling) messages
   - No more daily manual container restarts needed for auto-detection
 - **Rebuild After Fixes**: If auto-detection stopped working, rebuild with latest fixes:
   - `podman-compose build --no-cache koshelf && podman-compose up -d`
