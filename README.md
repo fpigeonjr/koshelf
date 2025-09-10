@@ -182,8 +182,8 @@ Configure Syncthing to sync BOTH directories for complete functionality:
 - **Type**: Receive Only (Mac receives changes from Kindle)
 - **Important**: Create symlink `data/statistics.sqlite3 → ../statistics.sqlite3` for KOShelf compatibility
 
-### 4. Configure Ignore Patterns
-For both folders, use these ignore patterns:
+### 4. Configure Ignore Patterns ⚠️ CRITICAL for Statistics
+For both folders, use these ignore patterns (IMPORTANT: do NOT exclude SQLite WAL files):
 ```
 /.syncthing/
 /.stfolder
@@ -192,9 +192,9 @@ For both folders, use these ignore patterns:
 *~
 .DS_Store
 DavLock*
-*-shm
-*-wal
 ```
+
+**⚠️ WARNING**: Do NOT add `*-shm` or `*-wal` patterns to `.stignore` files. SQLite WAL (Write-Ahead Log) files contain recent database changes that must sync for statistics and calendar pages to update properly.
 
 ### 5. Test Sync
 1. **Make a highlight** in KOReader
@@ -355,11 +355,29 @@ Syncthing and KOShelf have specific requirements for file extensions:
    - Use Syncthing's "Override Changes" on the receive-only device (Mac) when conflicts occur
    - Ensure new books use lowercase `.epub` extensions before syncing
 
-### Statistics Database Issues
+### Statistics Database Issues ⚠️ CRITICAL 
 If reading statistics or calendar pages show outdated data:
 
-1. **Verify Two-Folder Sync**: Both `koreader-books` and `koreader-settings` must be syncing
-2. **Check Database Location**: 
+1. **Check SQLite WAL File Sync (Most Common Issue)**:
+   ```bash
+   # CRITICAL: Verify .stignore files don't exclude WAL files
+   cat ./data/koreader-settings/.stignore | grep -E "\*-wal|\*-shm"
+   
+   # If found, remove these lines from BOTH device and local .stignore files:
+   # *-shm (SQLite shared memory files)  
+   # *-wal (SQLite Write-Ahead Log files)
+   
+   # Recent database changes are stored in WAL files that must sync
+   ```
+
+2. **Verify Two-Folder Sync**: Both `koreader-books` and `koreader-settings` must be syncing
+   ```bash
+   # Check both folders have .syncthing directories  
+   ls -la ./data/books/.syncthing
+   ls -la ./data/koreader-settings/.syncthing
+   ```
+
+3. **Check Database Location**: 
    ```bash
    # Verify symlink exists
    ls -la ./data/koreader-settings/data/statistics.sqlite3
@@ -368,12 +386,29 @@ If reading statistics or calendar pages show outdated data:
    cd ./data/koreader-settings/data
    ln -sf ../statistics.sqlite3 statistics.sqlite3
    ```
-3. **Compare Database Timestamps**:
+
+4. **Compare Database Timestamps & WAL Files**:
    ```bash
-   # Check modification times
-   ls -la ./data/koreader-settings/statistics.sqlite3
-   ls -la [device]/koreader/settings/statistics.sqlite3
+   # Check main database and WAL files modification times
+   ls -la ./data/koreader-settings/statistics.sqlite3*
+   ls -la [device]/koreader/settings/statistics.sqlite3*
+   
+   # WAL files (*-wal, *-shm) contain recent changes
+   # If WAL files exist but aren't syncing, statistics will be stale
    ```
+
+5. **Force Database Commit (Advanced)**:
+   ```bash
+   # Force WAL checkpoint to commit changes (if WAL files persist)
+   sqlite3 ./data/koreader-settings/statistics.sqlite3 "PRAGMA wal_checkpoint(FULL);"
+   
+   # Or restart KOReader completely to force statistics commit
+   ```
+
+**Understanding the Data Flow**:
+- **.sdr files**: Immediate sync (highlights, annotations)
+- **Statistics database**: Delayed sync (KOReader batches writes)
+- **WAL files**: Recent database changes that must sync for current statistics
 
 ### KOReader Connectivity Issues
 1. **Network Discovery**:
@@ -446,28 +481,49 @@ If reading statistics or calendar pages show outdated data:
 
 ### Auto-Regeneration Issues
 1. **File Detection Problems**:
-   ```bash
-   # Check if watchers are running
-   podman-compose exec koshelf ps aux | grep -E "inotifywait|backup_poll"
-   
-   # Monitor detection logs
-   podman-compose logs -f koshelf | grep -E "file change detected|Polling detected"
-   
-   # Test manual trigger
-   touch ./data/books/test.epub && rm ./data/books/test.epub
-   ```
+    ```bash
+    # Check if watchers are running (should see 4-5 processes)
+    podman-compose exec koshelf ps aux | grep -E "inotifywait|backup_poll"
+    
+    # Monitor detection logs (both inotify and polling)
+    podman-compose logs -f koshelf | grep -E "file change detected|Polling detected|Site generated"
+    
+    # Test manual trigger
+    touch ./data/books/test.epub && rm ./data/books/test.epub
+    ```
 
-2. **Polling vs inotify**:
-   ```bash
-   # inotify may not work with Docker bind mounts on macOS
-   # Polling provides backup detection every 30 seconds
-   
-   # Check polling interval
-   podman-compose exec koshelf env | grep POLL_INTERVAL
-   
-   # Force immediate regeneration
-   podman-compose restart koshelf
-   ```
+2. **Polling vs inotify - Dual Detection System**:
+    ```bash
+    # Both systems run simultaneously for maximum reliability
+    # inotify: Real-time detection (when supported)
+    # Polling: Backup detection every 30 seconds (macOS compatibility)
+    
+    # Check polling baseline initialization
+    podman-compose logs koshelf | grep "Polling baseline initialized"
+    
+    # Monitor specific polling activity  
+    podman-compose logs -f koshelf | grep "Polling detected"
+    
+    # Verify polling interval setting
+    podman-compose exec koshelf env | grep POLL_INTERVAL
+    
+    # Force immediate regeneration
+    podman-compose restart koshelf
+    ```
+
+3. **Common Auto-Detection Fixes (2024 Updates)**:
+    ```bash
+    # Fixed: Polling mechanism breaking with large file counts (625+ files)
+    # Fixed: WAL file exclusion preventing statistics sync
+    # Fixed: Feedback loops from watching output directories
+    
+    # If auto-detection stopped working, rebuild container:
+    podman-compose build --no-cache koshelf
+    podman-compose up -d
+    
+    # Check for simplified polling success
+    podman-compose logs koshelf | tail -20 | grep -E "backup_poll|Polling detected"
+    ```
 
 ### Performance & Resource Issues
 1. **Container Resource Usage**:

@@ -128,7 +128,7 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
         sleep 2
         LAST_BOOKS_COUNT=$(find "$BOOKS_DIR" -name "*.epub" 2>/dev/null | wc -l)
         LAST_SDR_COUNT=$(find "$BOOKS_DIR" -name "*.sdr" -type d 2>/dev/null | wc -l)
-        LAST_SDR_MTIME=$(find "$BOOKS_DIR" -name "*.sdr" -type d -exec find {} -type f \; 2>/dev/null | xargs stat -c %Y 2>/dev/null | sort -n | tail -1 || echo 0)
+        # No longer need LAST_SDR_MTIME with simplified approach
         if [ -f "$STATISTICS_DB" ]; then
             LAST_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
         else
@@ -158,11 +158,11 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
                 continue
             fi
             
-            # Check for .sdr directory content changes (highlight files, metadata)
-            CURRENT_SDR_MTIME=$(find "$BOOKS_DIR" -name "*.sdr" -type d -exec find {} -type f \; 2>/dev/null | xargs stat -c %Y 2>/dev/null | sort -n | tail -1 || echo 0)
-            if [ "$CURRENT_SDR_MTIME" -gt "$LAST_SDR_MTIME" ]; then
-                echo "Polling detected .sdr content change (newest file: $(date -d @$CURRENT_SDR_MTIME 2>/dev/null || date))"
-                LAST_SDR_MTIME=$CURRENT_SDR_MTIME
+            # Check for .sdr directory changes (simplified approach)
+            # Method 1: Check if any .sdr directory was modified recently
+            RECENT_SDR_CHANGES=$(find "$BOOKS_DIR" -name "*.sdr" -type d -newermt "$POLL_INTERVAL seconds ago" 2>/dev/null | wc -l)
+            if [ "$RECENT_SDR_CHANGES" -gt 0 ]; then
+                echo "Polling detected recent .sdr changes ($RECENT_SDR_CHANGES directories modified)"
                 generate_site
                 continue
             fi

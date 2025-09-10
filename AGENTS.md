@@ -350,30 +350,42 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
 - Verify backward compatibility with existing data
 
 ### When Debugging Statistics Issues
+- **CRITICAL: SQLite WAL File Exclusion** - Most common issue causing stale statistics:
+  - Check `.stignore` files: `cat data/koreader-settings/.stignore | grep -E "\*-wal|\*-shm"`
+  - **REMOVE** `*-wal` and `*-shm` patterns from both device and local `.stignore` files
+  - SQLite WAL (Write-Ahead Log) files contain recent database changes that must sync
+  - Without WAL sync: highlights update immediately (.sdr files) but statistics/calendar show stale data
+  - **Fix**: Edit `.stignore` on both device and local, remove WAL exclusions, force resync
 - **Verify Two-Folder Sync**: Confirm both `koreader-books` and `koreader-settings` folders are syncing
 - **Check Database Location**: KOReader writes to root `statistics.sqlite3`, KOShelf reads from `data/statistics.sqlite3`
 - **Validate Symlink**: Ensure `data/statistics.sqlite3` symlinks to `../statistics.sqlite3`
-- **Compare Timestamps**: Check modification times on both device and local statistics databases
+- **Compare Timestamps**: Check modification times on both device and local statistics databases AND WAL files
 - **Monitor Syncthing Conflicts**: Watch for case sensitivity issues with .epub/.EPUB extensions
 - **Verify Sync Status**: Check for `.syncthing` folders in both synced directories
-- **CRITICAL .stignore Issue**: Default `.stignore` files exclude SQLite WAL/SHM files (`*-wal`, `*-shm`)
-  - Remove these patterns from both device and local `.stignore` files
-  - SQLite WAL files contain recent database changes that won't sync if ignored
-  - This causes statistics/calendar to show stale data while highlights update correctly
 - **Two-Phase Data Flow**: .sdr files (highlights) sync immediately, statistics database updates are batched/delayed by KOReader
 - **Force Database Updates**: Restart KOReader completely to force statistics commit to database
+- **WAL Checkpoint**: Advanced - force WAL commit with `sqlite3 statistics.sqlite3 "PRAGMA wal_checkpoint(FULL);"`
 
 ### When Debugging Auto-Regeneration Issues
-- **Check Both Systems**: Verify both inotify and polling processes are running
-- **Monitor Detection Logs**: Use grep patterns to filter for detection events
+- **Check Both Systems**: Verify both inotify and polling processes are running (should see 4-5 watchers)
+  - Use: `podman exec koshelf ps aux | grep -E "inotifywait|backup_poll"`
+- **Monitor Detection Logs**: Use specific grep patterns to filter for detection events
+  - Use: `podman-compose logs -f koshelf | grep -E "file change detected|Polling detected|Site generated"`
 - **Test Each System**: Manually trigger file changes to test detection
+  - Test: `touch data/books/test.epub && rm data/books/test.epub`
 - **Validate Container State**: Ensure watchers survive container restarts
-- **Platform Considerations**: Remember macOS relies more heavily on polling
-- **Timeout Issues**: Check if polling interval needs adjustment for large libraries
-- **Feedback Loop Detection**: If seeing constant rebuilds every 30s, check for feedback loops
-  - Fixed in current version with proper exclusion filters for output directories and temp files
+- **Platform Considerations**: macOS relies more heavily on polling due to Docker bind mount limitations
+- **2024 FIXES APPLIED**:
+  - **Fixed: Polling Mechanism Breaking** - Complex `find | xargs stat` pipeline failed with 625+ files due to command line length limits
+  - **Solution**: Replaced with simple time-based detection `find ... -newermt "$POLL_INTERVAL seconds ago"`  
+  - **Fixed: WAL File Exclusion** - `.stignore` files excluding SQLite WAL files prevented statistics sync
+  - **Fixed: Feedback Loops** - Watchers monitoring output directories causing constant rebuilds
+- **Current Status Verification**:
   - Look for "Polling baseline initialized" message indicating proper startup
-  - Test detection with: `cp book.epub test.epub && rm test.epub` to verify polling works
+  - Check for simplified polling success: `podman-compose logs koshelf | grep "backup_poll"`
+  - No more daily manual container restarts needed for auto-detection
+- **Rebuild After Fixes**: If auto-detection stopped working, rebuild with latest fixes:
+  - `podman-compose build --no-cache koshelf && podman-compose up -d`
 
 ### When Debugging Syncthing Issues
 - **Case Sensitivity**: Look for mixed .epub/.EPUB extension conflicts
