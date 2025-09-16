@@ -519,7 +519,30 @@ If reading statistics or calendar pages show outdated data:
     touch ./data/books/test.epub && rm ./data/books/test.epub
     ```
 
-2. **Polling vs inotify - Dual Detection System**:
+2. **⚠️ CURRENT KNOWN ISSUE**: Auto-detection may fail despite Syncthing working correctly
+    ```bash
+    # SYMPTOMS: New highlights sync to .sdr files but don't appear in web UI
+    # DIAGNOSIS: Both inotify and polling miss file changes in .sdr directories
+    
+    # IMMEDIATE WORKAROUND (until fixed):
+    podman-compose restart koshelf    # Immediately detects all changes
+    
+    # DEBUG STEPS:
+    # 1. Verify highlights are in metadata files:
+    grep -r "highlight" ./data/books/*/metadata.epub.lua
+    
+    # 2. Check last regeneration timestamp vs file modification:
+    ls -la ./data/site-output/index.html  # Last regeneration time
+    find ./data/books -name "*.lua" -newer ./data/site-output/index.html
+    
+    # 3. Monitor for missed detection events:
+    # Make highlight on device, wait for sync, then:
+    podman-compose logs --tail=20 koshelf | grep -E "detected|Site generated"
+    
+    # If no detection logged but files changed, auto-detection is failing
+    ```
+
+3. **Polling vs inotify - Dual Detection System**:
     ```bash
     # Both systems run simultaneously for maximum reliability
     # inotify: Real-time detection (when supported)

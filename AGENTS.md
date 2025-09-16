@@ -350,21 +350,23 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
 - Verify backward compatibility with existing data
 
 ### When Debugging Statistics Issues
-- **CRITICAL: SQLite WAL File Exclusion** - Most common issue causing stale statistics:
+- **RESOLVED ✅: Two-Folder Syncthing Setup** - Complete solution implemented September 2025:
+  - **Both folders now syncing**: Documents (`data/books`) + Settings (`data/koreader-settings`) both have `.stfolder` markers
+  - **Automatic statistics sync**: Confirmed working - statistics increased from 27→28 books, 1415→1511 page stats automatically
+  - **No manual intervention**: Statistics and highlights sync automatically via WiFi
+  - **Verification**: Check logs for increasing book/page counts between regenerations
+- **CRITICAL: SQLite WAL File Exclusion** - Historical issue now resolved:
   - Check `.stignore` files: `cat data/koreader-settings/.stignore | grep -E "\*-wal|\*-shm"`
   - **REMOVE** `*-wal` and `*-shm` patterns from both device and local `.stignore` files
   - SQLite WAL (Write-Ahead Log) files contain recent database changes that must sync
   - Without WAL sync: highlights update immediately (.sdr files) but statistics/calendar show stale data
   - **Fix**: Edit `.stignore` on both device and local, remove WAL exclusions, force resync
-- **NEW: Database Sync Detection Issues** - Statistics/calendar pages showing stale data despite Syncthing working:
-  - **Immediate Check**: Compare database timestamps: `ls -la data/koreader-settings/statistics.sqlite3` vs Kindle file
-  - **Auto-Detection Test**: `touch data/koreader-settings/statistics.sqlite3 && sleep 35` - should trigger regeneration
-  - **Manual Sync**: If timestamps differ, copy newer file: `cp /Volumes/Kindle/koreader/settings/statistics.sqlite3 data/koreader-settings/statistics.sqlite3`
-  - **Container Rebuild**: If detection still fails: `podman-compose build --no-cache koshelf && podman-compose up -d`
-  - **Look for Logs**: "Statistics database tracking" and "Statistics database change detected" messages
 - **Verify Two-Folder Sync**: Confirm both `koreader-books` and `koreader-settings` folders are syncing
 - **Check Database Location**: KOReader writes to root `statistics.sqlite3`, KOShelf reads from `data/statistics.sqlite3`
 - **Validate Symlink**: Ensure `data/statistics.sqlite3` symlinks to `../statistics.sqlite3`
+  - **CRITICAL FIX**: If symlink points to old database, fix with: `cd data/koreader-settings/data && rm statistics.sqlite3 && ln -s ../statistics.sqlite3 statistics.sqlite3`
+  - **Verification**: Check file sizes match: `stat data/koreader-settings/statistics.sqlite3 data/koreader-settings/data/statistics.sqlite3`
+  - **Symptoms of broken symlink**: Statistics drop dramatically (e.g., 1517→872 pages), missing recent highlights, outdated calendar
 - **Compare Timestamps**: Check modification times on both device and local statistics databases AND WAL files
 - **Monitor Syncthing Conflicts**: Watch for case sensitivity issues with .epub/.EPUB extensions
 - **Verify Sync Status**: Check for `.syncthing` folders in both synced directories
@@ -400,6 +402,15 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - No more daily manual container restarts needed for auto-detection
 - **Rebuild After Fixes**: If auto-detection stopped working, rebuild with latest fixes:
   - `podman-compose build --no-cache koshelf && podman-compose up -d`
+- **CURRENT KNOWN ISSUE (Sept 2025)**: Auto-detection may fail to trigger on .sdr file changes despite Syncthing working
+  - **Symptoms**: New highlights sync to metadata files but don't appear in web UI until manual container restart
+  - **Temporary Workaround**: `podman-compose restart koshelf` immediately detects changes
+  - **Debug Steps**: 
+    1. Check if watchers are running: `podman exec koshelf ps aux | grep -E "inotifywait|backup_poll"`
+    2. Monitor detection logs: `podman-compose logs -f koshelf | grep -E "file change detected|Polling detected"`
+    3. Test detection manually: `touch data/books/test.epub && rm data/books/test.epub`
+    4. Check .sdr file timestamps vs last regeneration timestamp
+  - **Root Cause Investigation Needed**: Determine why both inotify and polling missed file changes in .sdr directories
 
 ### When Debugging Syncthing Issues
 - **Case Sensitivity**: Look for mixed .epub/.EPUB extension conflicts
