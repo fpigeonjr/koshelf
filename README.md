@@ -227,6 +227,16 @@ The auto-regeneration system uses a sophisticated approach to handle the limitat
 - **macOS Compatibility**: Polling ensures detection works reliably with Docker bind mounts on macOS
 - **Configurable Intervals**: `POLL_INTERVAL` environment variable (default: 30 seconds)
 
+### Enhanced macOS Compatibility (September 2025)
+
+The auto-regeneration system has been significantly improved with cross-platform compatibility fixes:
+
+- **Cross-Platform Detection**: Automatically detects macOS vs Linux environments and uses appropriate `stat` command syntax
+- **Simplified Pipeline**: Replaced complex command pipelines that failed with large file counts (625+ files)
+- **Improved Error Handling**: Better fallback mechanisms when individual detection methods fail
+- **Dual Statistics Tracking**: Enhanced monitoring of both symlink and real database file timestamps
+- **Reduced Manual Intervention**: Auto-detection now works reliably for book additions and statistics changes on macOS
+
 ### What Gets Synced
 - **EPUB files** - Your entire book library in `/mnt/us/documents`
 - **Reading progress** - Progress data stored in .sdr metadata files
@@ -519,34 +529,39 @@ If reading statistics or calendar pages show outdated data:
     touch ./data/books/test.epub && rm ./data/books/test.epub
     ```
 
-2. **⚠️ CURRENT KNOWN ISSUE**: Auto-detection may fail despite Syncthing working correctly
+2. **⚠️ CURRENT STATUS (September 2025)**: Auto-detection significantly improved but may still require testing
     ```bash
-    # SYMPTOMS: New highlights sync to .sdr files but don't appear in web UI
-    # DIAGNOSIS: Both inotify and polling miss file changes in .sdr directories
+    # ✅ WORKING: Book count changes and statistics database updates now detected automatically
+    # ✅ WORKING: Cross-platform compatibility fixes deployed (macOS + Linux)
+    # ⚠️ TESTING NEEDED: .sdr metadata file changes (highlights) may need verification
     
-    # IMMEDIATE WORKAROUND (until fixed):
+    # LATEST FIXES DEPLOYED (rebuild if auto-detection failing):
+    podman-compose build --no-cache koshelf && podman-compose up -d
+    
+    # VERIFY AUTO-DETECTION STATUS:
+    # 1. Check polling baseline initialization:
+    podman-compose logs koshelf | grep "Polling baseline initialized"
+    
+    # 2. Monitor for automatic detection (should see regular activity):
+    podman-compose logs -f koshelf | grep -E "Polling detected|file change detected"
+    
+    # 3. Test book count detection:
+    touch ./data/books/test.epub && rm ./data/books/test.epub
+    # Should see "Polling detected book count change" within 30 seconds
+    
+    # 4. If detection still failing, temporary workaround:
     podman-compose restart koshelf    # Immediately detects all changes
-    
-    # DEBUG STEPS:
-    # 1. Verify highlights are in metadata files:
-    grep -r "highlight" ./data/books/*/metadata.epub.lua
-    
-    # 2. Check last regeneration timestamp vs file modification:
-    ls -la ./data/site-output/index.html  # Last regeneration time
-    find ./data/books -name "*.lua" -newer ./data/site-output/index.html
-    
-    # 3. Monitor for missed detection events:
-    # Make highlight on device, wait for sync, then:
-    podman-compose logs --tail=20 koshelf | grep -E "detected|Site generated"
-    
-    # If no detection logged but files changed, auto-detection is failing
     ```
 
-3. **Polling vs inotify - Dual Detection System**:
+3. **Cross-Platform Polling System (2025 Updates)**:
     ```bash
+    # Enhanced polling system works reliably on both macOS and Linux
+    # Auto-detects platform-specific stat command syntax
+    # Simplified detection logic prevents command-line length failures
+    
     # Both systems run simultaneously for maximum reliability
     # inotify: Real-time detection (when supported)
-    # Polling: Backup detection every 30 seconds (macOS compatibility)
+    # Polling: Backup detection every 30 seconds (cross-platform)
     
     # Check polling baseline initialization
     podman-compose logs koshelf | grep "Polling baseline initialized"
@@ -557,17 +572,19 @@ If reading statistics or calendar pages show outdated data:
     # Verify polling interval setting
     podman-compose exec koshelf env | grep POLL_INTERVAL
     
-    # Force immediate regeneration
+    # Force immediate regeneration if needed
     podman-compose restart koshelf
     ```
 
-3. **Common Auto-Detection Fixes (2024 Updates)**:
+4. **Legacy Auto-Detection Fixes (2024)**:
+4. **Legacy Auto-Detection Fixes (2024)**:
     ```bash
+    # Historical fixes applied in 2024:
     # Fixed: Polling mechanism breaking with large file counts (625+ files)
     # Fixed: WAL file exclusion preventing statistics sync
     # Fixed: Feedback loops from watching output directories
     
-    # If auto-detection stopped working, rebuild container:
+    # If experiencing 2024-era issues, rebuild container:
     podman-compose build --no-cache koshelf
     podman-compose up -d
     

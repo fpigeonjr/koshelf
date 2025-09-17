@@ -123,30 +123,47 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
         echo "KOReader settings directory not accessible, skipping stats watcher"
         STATS_WATCHER_PID=""
     fi
-    
     # Start backup polling mechanism (for macOS Docker bind mount issues)
     echo "Starting backup polling mechanism (every ${POLL_INTERVAL}s)..."
     (
+        # Define cross-platform mtime function
+        get_mtime() {
+            local file="$1"
+            if [ -f "$file" ]; then
+                stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || echo 0
+            else
+                echo 0
+            fi
+        }
+        
         # Initialize baseline values after initial generation to avoid false positives
         sleep 2
         LAST_BOOKS_COUNT=$(find "$BOOKS_DIR" -name "*.epub" 2>/dev/null | wc -l)
         LAST_SDR_COUNT=$(find "$BOOKS_DIR" -name "*.sdr" -type d 2>/dev/null | wc -l)
+        
         # Initialize statistics database tracking for both symlink and real file
-        if [ -f "$STATISTICS_DB" ]; then
-            LAST_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
-        else
-            LAST_STATS_MTIME=0
-        fi
+        LAST_STATS_MTIME=$(get_mtime "$STATISTICS_DB")
         
         REAL_STATS_DB="$KOREADER_SETTINGS_DIR/statistics.sqlite3"
-        if [ -f "$REAL_STATS_DB" ]; then
-            LAST_REAL_STATS_MTIME=$(stat -c %Y "$REAL_STATS_DB" 2>/dev/null || echo 0)
-        else
-            LAST_REAL_STATS_MTIME=0
+        LAST_REAL_STATS_MTIME=$(get_mtime "$REAL_STATS_DB")
+        
+        # Track .sdr content changes by monitoring all metadata files - simplified approach
+        LAST_SDR_CONTENT_MTIME=0
+        if [ -d "$BOOKS_DIR" ]; then
+            # Get the most recent .sdr content modification time using a simpler method
+            for sdr_dir in $(find "$BOOKS_DIR" -name "*.sdr" -type d 2>/dev/null); do
+                if [ -f "$sdr_dir/metadata.epub.lua" ]; then
+                    mtime=$(get_mtime "$sdr_dir/metadata.epub.lua")
+                    if [ "$mtime" -gt "$LAST_SDR_CONTENT_MTIME" ]; then
+                        LAST_SDR_CONTENT_MTIME=$mtime
+                    fi
+                fi
+            done
         fi
         
         echo "Polling baseline initialized: $LAST_BOOKS_COUNT books, $LAST_SDR_COUNT .sdr dirs"
         echo "Statistics database tracking: symlink mtime=$LAST_STATS_MTIME, real file mtime=$LAST_REAL_STATS_MTIME"
+        echo "SDR content tracking: latest metadata mtime=$LAST_SDR_CONTENT_MTIME"
         
         while true; do
             sleep "$POLL_INTERVAL"
@@ -169,37 +186,42 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
                 continue
             fi
             
-            # Check for .sdr directory changes (simplified approach)
-            # Method 1: Check if any .sdr directory was modified recently
-            RECENT_SDR_CHANGES=$(find "$BOOKS_DIR" -name "*.sdr" -type d -newermt "$POLL_INTERVAL seconds ago" 2>/dev/null | wc -l)
-            if [ "$RECENT_SDR_CHANGES" -gt 0 ]; then
-                echo "Polling detected recent .sdr changes ($RECENT_SDR_CHANGES directories modified)"
+            # Check for .sdr content changes (monitor .lua files inside .sdr directories)
+            CURRENT_SDR_CONTENT_MTIME=0
+            if [ -d "$BOOKS_DIR" ]; then
+                # Get the most recent .sdr content modification time using a simpler method
+                for sdr_dir in $(find "$BOOKS_DIR" -name "*.sdr" -type d 2>/dev/null); do
+                    if [ -f "$sdr_dir/metadata.epub.lua" ]; then
+                        mtime=$(get_mtime "$sdr_dir/metadata.epub.lua")
+                        if [ "$mtime" -gt "$CURRENT_SDR_CONTENT_MTIME" ]; then
+                            CURRENT_SDR_CONTENT_MTIME=$mtime
+                        fi
+                    fi
+                done
+            fi
+            
+            if [ "$CURRENT_SDR_CONTENT_MTIME" -gt "$LAST_SDR_CONTENT_MTIME" ]; then
+                echo "Polling detected .sdr content changes (metadata files updated)"
+                LAST_SDR_CONTENT_MTIME=$CURRENT_SDR_CONTENT_MTIME
                 generate_site
                 continue
             fi
             
             # Check for statistics database changes (watch both symlink target and link itself)
             STATS_CHANGED=false
-            if [ -f "$STATISTICS_DB" ]; then
-                CURRENT_STATS_MTIME=$(stat -c %Y "$STATISTICS_DB" 2>/dev/null || echo 0)
-                if [ "$CURRENT_STATS_MTIME" -gt "$LAST_STATS_MTIME" ]; then
-                    echo "Polling detected statistics database change (symlink target)"
-                    LAST_STATS_MTIME=$CURRENT_STATS_MTIME
-                    STATS_CHANGED=true
-                fi
+            CURRENT_STATS_MTIME=$(get_mtime "$STATISTICS_DB")
+            if [ "$CURRENT_STATS_MTIME" -gt "$LAST_STATS_MTIME" ]; then
+                echo "Polling detected statistics database change (symlink target)"
+                LAST_STATS_MTIME=$CURRENT_STATS_MTIME
+                STATS_CHANGED=true
             fi
             
             # Also check the actual database file in case symlink doesn't update properly
-            REAL_STATS_DB="$KOREADER_SETTINGS_DIR/statistics.sqlite3"
-            if [ -f "$REAL_STATS_DB" ]; then
-                CURRENT_REAL_STATS_MTIME=$(stat -c %Y "$REAL_STATS_DB" 2>/dev/null || echo 0)
-                if [ -z "$LAST_REAL_STATS_MTIME" ]; then
-                    LAST_REAL_STATS_MTIME=$CURRENT_REAL_STATS_MTIME
-                elif [ "$CURRENT_REAL_STATS_MTIME" -gt "$LAST_REAL_STATS_MTIME" ]; then
-                    echo "Polling detected statistics database change (real file)"
-                    LAST_REAL_STATS_MTIME=$CURRENT_REAL_STATS_MTIME
-                    STATS_CHANGED=true
-                fi
+            CURRENT_REAL_STATS_MTIME=$(get_mtime "$REAL_STATS_DB")
+            if [ "$CURRENT_REAL_STATS_MTIME" -gt "$LAST_REAL_STATS_MTIME" ]; then
+                echo "Polling detected statistics database change (real file)"
+                LAST_REAL_STATS_MTIME=$CURRENT_REAL_STATS_MTIME
+                STATS_CHANGED=true
             fi
             
             if [ "$STATS_CHANGED" = true ]; then

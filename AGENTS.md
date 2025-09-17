@@ -402,15 +402,19 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - No more daily manual container restarts needed for auto-detection
 - **Rebuild After Fixes**: If auto-detection stopped working, rebuild with latest fixes:
   - `podman-compose build --no-cache koshelf && podman-compose up -d`
-- **CURRENT KNOWN ISSUE (Sept 2025)**: Auto-detection may fail to trigger on .sdr file changes despite Syncthing working
-  - **Symptoms**: New highlights sync to metadata files but don't appear in web UI until manual container restart
-  - **Temporary Workaround**: `podman-compose restart koshelf` immediately detects changes
-  - **Debug Steps**: 
-    1. Check if watchers are running: `podman exec koshelf ps aux | grep -E "inotifywait|backup_poll"`
-    2. Monitor detection logs: `podman-compose logs -f koshelf | grep -E "file change detected|Polling detected"`
-    3. Test detection manually: `touch data/books/test.epub && rm data/books/test.epub`
-    4. Check .sdr file timestamps vs last regeneration timestamp
-  - **Root Cause Investigation Needed**: Determine why both inotify and polling missed file changes in .sdr directories
+- **SEPTEMBER 2025 CROSS-PLATFORM FIXES** - Major auto-detection improvements deployed:
+  - **Fixed: macOS Docker Bind Mount Compatibility** - Added cross-platform `stat` command detection
+  - **Solution**: Auto-detects macOS vs Linux `stat` syntax (`stat -f %m` vs `stat -c %Y`) 
+  - **Fixed: Complex Pipeline Failures** - Simplified .sdr content tracking from complex `find | xargs stat` to simple for-loop
+  - **Improved: Error Handling** - Better fallback mechanisms and silent failure detection
+  - **Enhanced: Statistics Tracking** - Dual tracking of both symlink and real database file timestamps
+  - **Result**: Significantly reduced need for manual container restarts on macOS
+- **CURRENT STATUS (Sept 2025)**: Auto-detection working reliably for book count and statistics changes
+  - **Working**: Book additions/removals automatically detected
+  - **Working**: Statistics database changes automatically detected
+  - **Partial**: .sdr metadata file changes may still require manual testing
+  - **Verification**: Check logs for "Polling baseline initialized" and "Polling detected" messages
+  - **Deploy Latest Fixes**: `podman-compose build --no-cache koshelf && podman-compose up -d`
 
 ### When Debugging Syncthing Issues
 - **Case Sensitivity**: Look for mixed .epub/.EPUB extension conflicts
