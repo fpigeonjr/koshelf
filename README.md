@@ -229,12 +229,14 @@ The auto-regeneration system uses a sophisticated approach to handle the limitat
 
 ### Enhanced macOS Compatibility (September 2025)
 
-The auto-regeneration system has been significantly improved with cross-platform compatibility fixes:
+The auto-regeneration system has been significantly improved with cross-platform compatibility and enhanced statistics detection:
 
 - **Cross-Platform Detection**: Automatically detects macOS vs Linux environments and uses appropriate `stat` command syntax
 - **Simplified Pipeline**: Replaced complex command pipelines that failed with large file counts (625+ files)
 - **Improved Error Handling**: Better fallback mechanisms when individual detection methods fail
 - **Dual Statistics Tracking**: Enhanced monitoring of both symlink and real database file timestamps
+- **WAL File Monitoring**: Now monitors SQLite WAL (Write-Ahead Log) files for immediate statistics updates
+- **Periodic Safety Net**: Force regeneration every ~15 minutes as fallback for missed changes
 - **Reduced Manual Intervention**: Auto-detection now works reliably for book additions and statistics changes on macOS
 
 ### What Gets Synced
@@ -529,13 +531,15 @@ If reading statistics or calendar pages show outdated data:
     touch ./data/books/test.epub && rm ./data/books/test.epub
     ```
 
-2. **⚠️ CURRENT STATUS (September 2025)**: Auto-detection significantly improved but may still require testing
+2. **⚠️ CURRENT STATUS (September 2025)**: Auto-detection significantly improved with WAL file monitoring
     ```bash
-    # ✅ WORKING: Book count changes and statistics database updates now detected automatically
+    # ✅ WORKING: Book count changes automatically detected
+    # ✅ WORKING: Statistics database changes via WAL file monitoring
+    # ✅ NEW: Periodic safety net regeneration every ~15 minutes
     # ✅ WORKING: Cross-platform compatibility fixes deployed (macOS + Linux)
     # ⚠️ TESTING NEEDED: .sdr metadata file changes (highlights) may need verification
     
-    # LATEST FIXES DEPLOYED (rebuild if auto-detection failing):
+    # LATEST WAL MONITORING ENHANCEMENTS (rebuild if auto-detection failing):
     podman-compose build --no-cache koshelf && podman-compose up -d
     
     # VERIFY AUTO-DETECTION STATUS:
@@ -558,16 +562,19 @@ If reading statistics or calendar pages show outdated data:
     # Enhanced polling system works reliably on both macOS and Linux
     # Auto-detects platform-specific stat command syntax
     # Simplified detection logic prevents command-line length failures
+    # WAL file monitoring provides immediate statistics detection
+    # Periodic safety net regeneration every ~15 minutes
     
     # Both systems run simultaneously for maximum reliability
-    # inotify: Real-time detection (when supported)
-    # Polling: Backup detection every 30 seconds (cross-platform)
+    # inotify: Real-time detection (when supported) including WAL files
+    # Polling: Backup detection every 30 seconds (cross-platform) including WAL monitoring
+    # Periodic: Safety net regeneration every ~15 minutes as fallback
     
     # Check polling baseline initialization
     podman-compose logs koshelf | grep "Polling baseline initialized"
     
-    # Monitor specific polling activity  
-    podman-compose logs -f koshelf | grep "Polling detected"
+    # Monitor specific polling activity and WAL file detection  
+    podman-compose logs -f koshelf | grep -E "Polling detected|WAL file change detected"
     
     # Verify polling interval setting
     podman-compose exec koshelf env | grep POLL_INTERVAL

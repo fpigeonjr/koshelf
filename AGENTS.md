@@ -352,8 +352,9 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
 ### When Debugging Statistics Issues
 - **RESOLVED ✅: Two-Folder Syncthing Setup** - Complete solution implemented September 2025:
   - **Both folders now syncing**: Documents (`data/books`) + Settings (`data/koreader-settings`) both have `.stfolder` markers
-  - **Automatic statistics sync**: Confirmed working - statistics increased from 27→28 books, 1415→1511 page stats automatically
-  - **No manual intervention**: Statistics and highlights sync automatically via WiFi
+  - **Automatic statistics sync**: Confirmed working - statistics increased from 28 books, 1575→1618 page stats automatically (+43 pages)
+  - **Device sync conflict resolution**: Fixed failed items by synchronizing newer device database (Sep 18) with local database (Sep 17)
+  - **No manual intervention**: Statistics and highlights sync automatically via WiFi after initial setup
   - **Verification**: Check logs for increasing book/page counts between regenerations
 - **CRITICAL: SQLite WAL File Exclusion** - Historical issue now resolved:
   - Check `.stignore` files: `cat data/koreader-settings/.stignore | grep -E "\*-wal|\*-shm"`
@@ -402,6 +403,13 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - No more daily manual container restarts needed for auto-detection
 - **Rebuild After Fixes**: If auto-detection stopped working, rebuild with latest fixes:
   - `podman-compose build --no-cache koshelf && podman-compose up -d`
+- **SEPTEMBER 2025 WAL FILE MONITORING ENHANCEMENTS** - Enhanced statistics sync detection:
+  - **Enhanced: WAL File Detection** - Now monitors SQLite WAL files for immediate statistics updates
+  - **Solution**: Removed WAL file exclusions from inotify watchers to detect recent database changes
+  - **Enhanced: Polling WAL Tracking** - Backup polling now monitors WAL file timestamps
+  - **Added: Periodic Safety Net** - Force regeneration every ~15 minutes as fallback for missed changes
+  - **Improved: Logging** - Enhanced debug messages for WAL file change detection
+  - **Result**: Eliminates need for manual container restarts when Syncthing updates statistics database
 - **SEPTEMBER 2025 CROSS-PLATFORM FIXES** - Major auto-detection improvements deployed:
   - **Fixed: macOS Docker Bind Mount Compatibility** - Added cross-platform `stat` command detection
   - **Solution**: Auto-detects macOS vs Linux `stat` syntax (`stat -f %m` vs `stat -c %Y`) 
@@ -411,7 +419,9 @@ podman exec koshelf touch /app/books/test && rm /app/books/test
   - **Result**: Significantly reduced need for manual container restarts on macOS
 - **CURRENT STATUS (Sept 2025)**: Auto-detection working reliably for book count and statistics changes
   - **Working**: Book additions/removals automatically detected
-  - **Working**: Statistics database changes automatically detected
+  - **Working**: Statistics database changes automatically detected via WAL file monitoring
+  - **Enhanced**: SQLite WAL file detection for immediate statistics updates
+  - **NEW**: Periodic safety net regeneration every ~15 minutes as fallback
   - **Partial**: .sdr metadata file changes may still require manual testing
   - **Verification**: Check logs for "Polling baseline initialized" and "Polling detected" messages
   - **Deploy Latest Fixes**: `podman-compose build --no-cache koshelf && podman-compose up -d`

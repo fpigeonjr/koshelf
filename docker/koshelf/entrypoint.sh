@@ -110,9 +110,10 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
     STATS_DIR="$(dirname "$STATISTICS_DB")"
     if [ -d "$KOREADER_SETTINGS_DIR" ]; then
         # Watch both the settings directory and the data subdirectory for database changes
+        # IMPORTANT: Include WAL files as they contain recent SQLite changes
         inotifywait -m -e modify,create,move --format '%w%f %e' "$KOREADER_SETTINGS_DIR" "$STATS_DIR" 2>/dev/null | while read file event; do
-            # Only trigger on actual database changes, not temporary files
-            if [[ "$file" == *"statistics.sqlite3"* ]] && [[ "$file" != *".tmp"* ]] && [[ "$file" != *".temp"* ]] && [[ "$file" != *"-shm"* ]] && [[ "$file" != *"-wal"* ]]; then
+            # Trigger on database files INCLUDING WAL files (recent changes), exclude only temp files
+            if [[ "$file" == *"statistics.sqlite3"* ]] && [[ "$file" != *".tmp"* ]] && [[ "$file" != *".temp"* ]] && [[ "$file" != *"-shm"* ]]; then
                 echo "Statistics database change detected: $file ($event)"
                 sleep "$WATCH_INTERVAL"
                 generate_site
@@ -147,6 +148,10 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
         REAL_STATS_DB="$KOREADER_SETTINGS_DIR/statistics.sqlite3"
         LAST_REAL_STATS_MTIME=$(get_mtime "$REAL_STATS_DB")
         
+        # Also track WAL file changes (contains recent SQLite changes)
+        STATS_WAL="$KOREADER_SETTINGS_DIR/statistics.sqlite3-wal"
+        LAST_WAL_MTIME=$(get_mtime "$STATS_WAL")
+        
         # Track .sdr content changes by monitoring all metadata files - simplified approach
         LAST_SDR_CONTENT_MTIME=0
         if [ -d "$BOOKS_DIR" ]; then
@@ -162,17 +167,23 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
         fi
         
         echo "Polling baseline initialized: $LAST_BOOKS_COUNT books, $LAST_SDR_COUNT .sdr dirs"
-        echo "Statistics database tracking: symlink mtime=$LAST_STATS_MTIME, real file mtime=$LAST_REAL_STATS_MTIME"
+        echo "Statistics database tracking: symlink mtime=$LAST_STATS_MTIME, real file mtime=$LAST_REAL_STATS_MTIME, WAL mtime=$LAST_WAL_MTIME"
         echo "SDR content tracking: latest metadata mtime=$LAST_SDR_CONTENT_MTIME"
+        
+        # Safety counter for periodic force regeneration (every 30 poll cycles = ~15 minutes default)
+        FORCE_REGEN_COUNTER=0
+        FORCE_REGEN_INTERVAL=30
         
         while true; do
             sleep "$POLL_INTERVAL"
+            FORCE_REGEN_COUNTER=$((FORCE_REGEN_COUNTER + 1))
             
             # Check for new books (EPUB files)
             CURRENT_BOOKS_COUNT=$(find "$BOOKS_DIR" -name "*.epub" 2>/dev/null | wc -l)
             if [ "$CURRENT_BOOKS_COUNT" -ne "$LAST_BOOKS_COUNT" ]; then
                 echo "Polling detected book count change: $LAST_BOOKS_COUNT -> $CURRENT_BOOKS_COUNT"
                 LAST_BOOKS_COUNT=$CURRENT_BOOKS_COUNT
+                FORCE_REGEN_COUNTER=0
                 generate_site
                 continue
             fi
@@ -182,6 +193,7 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
             if [ "$CURRENT_SDR_COUNT" -ne "$LAST_SDR_COUNT" ]; then
                 echo "Polling detected .sdr directory change: $LAST_SDR_COUNT -> $CURRENT_SDR_COUNT"
                 LAST_SDR_COUNT=$CURRENT_SDR_COUNT
+                FORCE_REGEN_COUNTER=0
                 generate_site
                 continue
             fi
@@ -203,11 +215,12 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
             if [ "$CURRENT_SDR_CONTENT_MTIME" -gt "$LAST_SDR_CONTENT_MTIME" ]; then
                 echo "Polling detected .sdr content changes (metadata files updated)"
                 LAST_SDR_CONTENT_MTIME=$CURRENT_SDR_CONTENT_MTIME
+                FORCE_REGEN_COUNTER=0
                 generate_site
                 continue
             fi
             
-            # Check for statistics database changes (watch both symlink target and link itself)
+            # Check for statistics database changes (watch symlink, real file, AND WAL file)
             STATS_CHANGED=false
             CURRENT_STATS_MTIME=$(get_mtime "$STATISTICS_DB")
             if [ "$CURRENT_STATS_MTIME" -gt "$LAST_STATS_MTIME" ]; then
@@ -224,7 +237,24 @@ if [ "${KOSHELF_WATCH_MODE:-true}" = "true" ]; then
                 STATS_CHANGED=true
             fi
             
+            # Check WAL file for recent SQLite changes (most important for Syncthing updates)
+            CURRENT_WAL_MTIME=$(get_mtime "$STATS_WAL")
+            if [ "$CURRENT_WAL_MTIME" -gt "$LAST_WAL_MTIME" ]; then
+                echo "Polling detected statistics WAL file change (recent SQLite updates)"
+                LAST_WAL_MTIME=$CURRENT_WAL_MTIME
+                STATS_CHANGED=true
+            fi
+            
             if [ "$STATS_CHANGED" = true ]; then
+                FORCE_REGEN_COUNTER=0
+                generate_site
+                continue
+            fi
+            
+            # Periodic force regeneration as safety net (every ~15 minutes by default)
+            if [ "$FORCE_REGEN_COUNTER" -ge "$FORCE_REGEN_INTERVAL" ]; then
+                echo "Periodic force regeneration (safety net after $((FORCE_REGEN_COUNTER * POLL_INTERVAL)) seconds)"
+                FORCE_REGEN_COUNTER=0
                 generate_site
             fi
         done
