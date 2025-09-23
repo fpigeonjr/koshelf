@@ -185,6 +185,21 @@ Statistics/Calendar pages
 - **Calendar and statistics pages** - Require current statistics database, not just .sdr files
 - **Case sensitivity issues** - Syncthing conflicts occur with mixed .epub/.EPUB extensions
 
+#### Understanding KOShelf Statistics Metrics
+**IMPORTANT**: KOShelf uses different metrics than raw database queries, which can cause confusion when debugging:
+
+- **KOShelf "Total Pages Read"**: Counts individual page reading sessions from `page_stat_data` table
+  - Each time a page is read (including re-reading), it creates a session record
+  - Displayed as "page stats" in KOShelf logs (e.g., "Found 30 books and 1890 page stats")
+  - Higher numbers are normal and expected behavior
+
+- **Database `total_read_pages`**: Sum of completed pages from `book` table  
+  - Tracks actual pages completed per book, not reading sessions
+  - Lower numbers compared to KOShelf metrics are normal
+  - Used for different calculations than session-based statistics
+
+**Common Debugging Mistake**: Comparing KOShelf's session-based metrics (1890) with database completion metrics (1455) and assuming sync issues. These are different measurements - both are correct.
+
 #### Debugging Statistics Issues
 - Check `.sdr` directory contents for recent modifications (highlights/annotations)
 - Verify statistics database location and symlink: `koreader-settings/data/statistics.sqlite3 → ../statistics.sqlite3`

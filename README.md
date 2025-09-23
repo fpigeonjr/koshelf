@@ -472,6 +472,21 @@ If reading statistics or calendar pages show outdated data:
    ```
 
 ### Statistics and Calendar Page Issues  
+
+#### Understanding KOShelf Metrics (Important!)
+Before troubleshooting, understand that KOShelf uses different metrics than raw database queries:
+
+- **KOShelf "Total Pages Read"**: Counts individual page reading sessions from `page_stat_data` table
+  - Each time a page is read (including re-reading), it creates a session record
+  - Example: 1890 page stats = 1890 individual reading sessions
+  - Higher numbers are normal and expected
+
+- **Database `total_read_pages`**: Sum of completed pages from `book` table  
+  - Example: 1455 total pages = actual pages completed across all books
+  - Lower than KOShelf metrics is normal - different measurement
+
+**Common Mistake**: Comparing 1890 (sessions) with 1455 (completed pages) and assuming sync issues. Both are correct but measure different things.
+
 1. **Stale Reading Statistics**:
    ```bash
    # Check if statistics database is syncing from device
